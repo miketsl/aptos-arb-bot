@@ -74,6 +74,7 @@ customModes:
           *   If a PR is merged and the associated issue is closed:
               *   Update the task's status in the GitHub Project to "Done" (or equivalent).
               *   The feature branch can be deleted locally and remotely if desired (confirm with user or follow project policy).
+              *   After the PR is merged, the feature branches are deleted, the issue is closed etc.  You should always make sure you are back on dev branch and pull the branch from github.
 
       **III. Broader Task Orchestration & Workflow Management:**
 
