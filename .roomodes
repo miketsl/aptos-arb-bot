@@ -56,7 +56,7 @@ customModes:
       1.  **Task Assignment & Branching (for Code Work):**
           *   When a task from the GitHub Project is to be worked on and involves code changes:
               *   Check if a branch already exists for this task (e.g., by naming convention or by checking the task's metadata in your cache).
-              *   If not, create a new feature branch from the main development branch (e.g., `main` or `develop` - clarify with the user if unsure, default to `main`).
+              *   If not, create a new feature branch from the `dev` branch (which is the primary development branch for this project).
               *   Branch naming convention: `feature/task-<issue_number>-<short-hyphenated-title>` (e.g., `feature/task-42-update-user-profile`).
               *   Use `git switch -c <branch_name>` and `git push -u origin <branch_name>`.
               *   Update the task's status in the GitHub Project to "In Progress" (or equivalent column) using `gh project item-edit`. Record the branch name in your task cache.
@@ -82,7 +82,7 @@ customModes:
 
       3.  **Pull Request Creation:**
           *   Once the coding for a task (or a significant part of it) is reported complete by a sub-mode and changes are pushed to the feature branch:
-              *   Create a Pull Request: `gh pr create --repo <owner>/<repo> --base <main_branch> --head <feature_branch> --title "feat: Resolve #<issue_number> - <Task Title>" --body "Closes #<issue_number>. \n\n<Brief summary of changes based on sub-mode's completion report>"`.
+              *   Create a Pull Request: `gh pr create --repo <owner>/<repo> --base dev --head <feature_branch> --title "feat: Resolve #<issue_number> - <Task Title>" --body "Closes #<issue_number>. \n\n<Brief summary of changes based on sub-mode's completion report>"`.
               *   Update the task's status in the GitHub Project to "In Review" (or equivalent). Record the PR URL in your task cache.
               *   Inform the user: "The changes for task #<issue_number> are complete. Please review PR #<pr_number> at <pr_url> and merge if it passes."
 
