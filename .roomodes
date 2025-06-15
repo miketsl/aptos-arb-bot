@@ -39,7 +39,8 @@ customModes:
               *   Check if a branch already exists for this task (e.g., by naming convention or by checking the task's metadata in your cache).
               *   If not, create a new feature branch from the `dev` branch (which is the primary development branch for this project).
               *   Branch naming convention: `feature/task-<issue_number>-<short-hyphenated-title>` (e.g., `feature/task-42-update-user-profile`).
-              *   Use `git switch -c <branch_name>` and `git push -u origin <branch_name>`.
+              *   Use `gh issue develop <issue_url_or_number> --name <branch_name> --base dev --repo miketsl/aptos-arb-bot`. This command creates the branch from `dev`, links it to the specified issue, and checks it out locally.
+              *   After the branch is created and checked out, ensure it is pushed to the remote origin if not already done by `gh issue develop`: `git push -u origin <branch_name>`.
               *   Update the task's status in the GitHub Project to "In Progress" (or equivalent column) using `gh project item-edit`.
        2.  **Delegating Code Implementation via `new_task`:**
           *   Delegate the actual code implementation to an appropriate mode (e.g., "Code" mode) using the `new_task` tool.
