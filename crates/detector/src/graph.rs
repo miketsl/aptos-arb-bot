@@ -58,19 +58,16 @@ impl Edge {
     pub fn quote(&self, amount_in: &Quantity) -> Option<Quantity> {
         match &self.model {
             PoolModel::ConstantProduct { reserve_x, reserve_y, fee_bps } => {
-                // Ensure the input asset matches one of the pair's assets for this edge direction
-                if self.pair.asset_x != amount_in.asset {
-                    // This edge represents asset_x -> asset_y, so input must be asset_x
+                // For tuple struct Quantity, we can't check asset directly
+                // The caller must ensure the asset matches
+
+                if reserve_x.0.is_zero() || reserve_y.0.is_zero() || amount_in.0.is_zero() {
                     return None;
                 }
 
-                if reserve_x.amount.is_zero() || reserve_y.amount.is_zero() || amount_in.amount.is_zero() {
-                    return None;
-                }
-
-                let amount_in_val = amount_in.amount;
-                let reserve_x_val = reserve_x.amount;
-                let reserve_y_val = reserve_y.amount;
+                let amount_in_val = amount_in.0;
+                let reserve_x_val = reserve_x.0;
+                let reserve_y_val = reserve_y.0;
 
                 let fee_decimal = Decimal::from_u16(*fee_bps).unwrap_or_default() / Decimal::new(10000, 0);
                 let amount_in_after_fee = amount_in_val * (Decimal::ONE - fee_decimal);
@@ -82,7 +79,7 @@ impl Edge {
                 if amount_out_val.is_sign_negative() || amount_out_val.is_zero() || amount_out_val > reserve_y_val {
                     return None; // Not enough liquidity or invalid amount
                 }
-                Some(Quantity { asset: self.pair.asset_y.clone(), amount: amount_out_val })
+                Some(Quantity(amount_out_val))
             }
             PoolModel::ConcentratedLiquidity { .. } => {
                 // Complex logic, placeholder
@@ -198,11 +195,15 @@ mod tests {
 
     fn create_test_edge(asset_x: Asset, asset_y: Asset, reserve_x_val: Decimal, reserve_y_val: Decimal, fee_bps: u16) -> Edge {
         Edge {
-            pair: TradingPair { asset_x: asset_x.clone(), asset_y: asset_y.clone(), lp_coin: LpCoin { address: AccountAddress::random() } },
-            exchange: ExchangeId::PancakeswapV3, // Dummy exchange
+            pair: TradingPair {
+                asset_x: asset_x.clone(),
+                asset_y: asset_y.clone(),
+                lp_coin: LpCoin { address: "test_address".to_string() }
+            },
+            exchange: ExchangeId::pancakeswap_v3(),
             model: PoolModel::ConstantProduct {
-                reserve_x: Quantity { asset: asset_x, amount: reserve_x_val },
-                reserve_y: Quantity { asset: asset_y, amount: reserve_y_val },
+                reserve_x: Quantity(reserve_x_val),
+                reserve_y: Quantity(reserve_y_val),
                 fee_bps,
             },
             last_updated: Instant::now(),

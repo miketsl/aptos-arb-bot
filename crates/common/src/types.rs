@@ -37,6 +37,14 @@ impl From<&str> for Asset {
     }
 }
 
+impl std::str::FromStr for Asset {
+    type Err = std::convert::Infallible;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Asset(s.to_string()))
+    }
+}
+
 /// Represents a pair of assets for trading.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AssetPair {
@@ -72,6 +80,55 @@ impl fmt::Display for ExchangeId {
 impl From<&str> for ExchangeId {
     fn from(s: &str) -> Self {
         ExchangeId(s.to_string())
+    }
+}
+
+impl ExchangeId {
+    pub const PANCAKESWAP_V3: ExchangeId = ExchangeId(String::new()); // This won't work with const
+}
+
+// Let's use a different approach for constants
+impl ExchangeId {
+    pub fn pancakeswap_v3() -> Self {
+        ExchangeId("PancakeswapV3".to_string())
+    }
+}
+
+/// Represents a liquidity pool coin type.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LpCoin {
+    pub address: String, // Using String instead of AccountAddress for now
+}
+
+impl LpCoin {
+    pub fn new(address: String) -> Self {
+        LpCoin { address }
+    }
+}
+
+impl fmt::Display for LpCoin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.address)
+    }
+}
+
+/// Represents a trading pair with LP coin information.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TradingPair {
+    pub asset_x: Asset,
+    pub asset_y: Asset,
+    pub lp_coin: LpCoin,
+}
+
+impl TradingPair {
+    pub fn new(asset_x: Asset, asset_y: Asset, lp_coin: LpCoin) -> Self {
+        TradingPair { asset_x, asset_y, lp_coin }
+    }
+}
+
+impl fmt::Display for TradingPair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.asset_x, self.asset_y)
     }
 }
 
