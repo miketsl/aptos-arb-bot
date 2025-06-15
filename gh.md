@@ -79,7 +79,7 @@ gh pr create --repo <owner>/<repo> --base <base_branch> --head <feature_branch> 
 *   `<base_branch>` is typically `dev`.
 *   `<title_format>` example: `feat: Resolve #<issue_number> - <Task Title>`
 *   `<body_content>` example: `Closes #<issue_number>.\n\nSummary of changes.`
-*   Example: `gh pr create --repo miketsl/aptos-arb-bot --base dev --head feature/task-21-new-docs --title "docs: Resolve #21 - Add gh.md CLI reference" --body "Closes #21.\n\nThis PR adds the gh.md file as requested."`
+*   Example: `printf "%s\n\n%s" "Closes #21" "This PR introduces the gh.md file, which documents the gh CLI commands used by the Orchestrator PM mode. This is intended to improve the reliability of CLI usage, as requested in the feedback for the previous task." | gh pr create --repo miketsl/aptos-arb-bot --base dev --head feature/task-21-new-docs --title "docs: Resolve #21 - Add gh.md CLI reference" --body-file -`
 
 ### View a Pull Request
 ```bash
