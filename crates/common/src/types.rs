@@ -96,33 +96,17 @@ impl ExchangeId {
 
 /// Represents a liquidity pool coin type.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct LpCoin {
-    pub address: String, // Using String instead of AccountAddress for now
-}
 
-impl LpCoin {
-    pub fn new(address: String) -> Self {
-        LpCoin { address }
-    }
-}
 
-impl fmt::Display for LpCoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.address)
-    }
-}
-
-/// Represents a trading pair with LP coin information.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TradingPair {
     pub asset_x: Asset,
     pub asset_y: Asset,
-    pub lp_coin: LpCoin,
 }
 
 impl TradingPair {
-    pub fn new(asset_x: Asset, asset_y: Asset, lp_coin: LpCoin) -> Self {
-        TradingPair { asset_x, asset_y, lp_coin }
+    pub fn new(asset_x: Asset, asset_y: Asset) -> Self {
+        TradingPair { asset_x, asset_y }
     }
 }
 

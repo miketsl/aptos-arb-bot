@@ -234,7 +234,7 @@ impl PriceGraph for PriceGraphImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::types::{Asset, ExchangeId, LpCoin, Quantity, TradingPair};
+    use common::types::{Asset, ExchangeId, Quantity, TradingPair};
     use rust_decimal_macros::dec;
     use std::str::FromStr;
 
@@ -249,7 +249,6 @@ mod tests {
             pair: TradingPair {
                 asset_x: asset_x.clone(),
                 asset_y: asset_y.clone(),
-                lp_coin: LpCoin { address: "test_address".to_string() }
             },
             exchange: ExchangeId::pancakeswap_v3(),
             model: PoolModel::ConstantProduct {
