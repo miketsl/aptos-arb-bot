@@ -2,7 +2,7 @@ use testcontainers::{
     core::{ContainerPort, WaitFor},
     runners::AsyncRunner, // For async operations. Note: AsyncRunner itself might not be directly used if ImageExt provides .start()
     ContainerAsync,       // Use ContainerAsync for async
-                          // Image, // Unused import
+    // Image, // Unused import
     GenericImage,
     ImageExt,
 };
