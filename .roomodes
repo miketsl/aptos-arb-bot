@@ -137,5 +137,4 @@ customModes:
       - command
       - mcp
     customInstructions: >-
-      This mode MUST `git add` and `git commit` any changes with a descriptive commit message before ending any subtask or reporting completion.
-      The commit message should clearly summarize the changes made.
+      This mode MUST satisfy all checks on the project, specificaly it must pass the following: `cargo check --all-targets --all-features`, `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --all-targets --all-features`.  After all the checks have passed, it must also `git add`, `git commit` and `git push` any changes with a descriptive commit message before ending any subtask or reporting completion. The commit message should clearly summarize the changes made.
