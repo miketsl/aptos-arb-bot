@@ -168,6 +168,24 @@ pub struct TradeResult {
     pub message: Option<String>,     // For errors or additional info
 }
 
+/// Represents a path quote result from the arbitrage detector.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PathQuote {
+    pub path: Vec<(Asset, ExchangeId)>,
+    pub amount_in: Quantity,
+    pub amount_out: Quantity,
+    pub profit_pct: f64,
+}
+
+/// Represents cycle evaluation with gas accounting.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CycleEval {
+    pub gross_profit: rust_decimal::Decimal,
+    pub gas_estimate: u64,
+    pub gas_unit_price: rust_decimal::Decimal,
+    pub net_profit: rust_decimal::Decimal,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

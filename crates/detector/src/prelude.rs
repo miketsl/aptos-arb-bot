@@ -1,11 +1,11 @@
 //! Prelude for the detector crate.
 
 // Re-export commonly used types and traits from this crate.
-pub use crate::graph::{Edge, PoolModel, Tick}; // Add PriceGraph and PriceGraphSnapshot once defined
+pub use crate::graph::{Edge, PoolModel, PriceGraph, PriceGraphSnapshot, Tick};
 
 // Re-export relevant items from common crate
 pub use common::errors::DexAdapterError;
-pub use common::types::{Asset, ExchangeId, Quantity, TradingPair}; // Or a more specific error type for detector
+pub use common::types::{Asset, CycleEval, ExchangeId, PathQuote, Quantity, TradingPair}; // Or a more specific error type for detector
 
 // Re-export external crates if they are widely used within the detector crate modules
 pub use aptos_sdk::types::account_address::AccountAddress;
