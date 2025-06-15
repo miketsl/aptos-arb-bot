@@ -19,3 +19,5 @@ Cargo.lock
 # Operating system files
 .DS_Store
 Thumbs.db
+# Roo task cache
+.roo_task_cache.json
