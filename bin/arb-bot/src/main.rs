@@ -2,7 +2,6 @@
 
 fn main() {
     core::init();
-    dex_adapter_trait::init();
     detector::init();
     executor::init();
     analytics::init();
