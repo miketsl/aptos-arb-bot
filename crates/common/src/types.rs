@@ -75,6 +75,61 @@ impl From<&str> for ExchangeId {
     }
 }
 
+/// Represents the type of an order (Buy or Sell).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OrderType {
+    Buy,
+    Sell,
+}
+
+impl fmt::Display for OrderType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OrderType::Buy => write!(f, "BUY"),
+            OrderType::Sell => write!(f, "SELL"),
+        }
+    }
+}
+
+/// Represents a trade order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Order {
+    pub id: String, // Unique order identifier
+    pub pair: AssetPair,
+    pub order_type: OrderType,
+    pub price: Price,
+    pub quantity: Quantity,
+    pub exchange: ExchangeId,
+    // Timestamp, etc. can be added later
+}
+
+/// Represents the status of a trade execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TradeStatus {
+    Pending,
+    Filled,
+    PartiallyFilled,
+    Cancelled,
+    Rejected,
+    Error,
+}
+
+impl fmt::Display for TradeStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+/// Represents the result of a trade execution attempt.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TradeResult {
+    pub order_id: String,
+    pub status: TradeStatus,
+    pub filled_quantity: Quantity,
+    pub filled_price: Option<Price>, // Average filled price
+    pub message: Option<String>,     // For errors or additional info
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,5 +192,44 @@ mod tests {
         let q1 = Quantity(dec!(10.0));
         let q2 = Quantity(dec!(5.0));
         assert!(q2 < q1);
+    }
+
+    #[test]
+    fn test_order_type_display() {
+        assert_eq!(format!("{}", OrderType::Buy), "BUY");
+        assert_eq!(format!("{}", OrderType::Sell), "SELL");
+    }
+
+    #[test]
+    fn test_trade_status_display() {
+        assert_eq!(format!("{}", TradeStatus::Filled), "Filled");
+        assert_eq!(format!("{}", TradeStatus::Error), "Error");
+    }
+
+    #[test]
+    fn test_order_creation() {
+        let order = Order {
+            id: "order123".to_string(),
+            pair: AssetPair::new(Asset::from("BTC"), Asset::from("USDT")),
+            order_type: OrderType::Buy,
+            price: Price(dec!(50000.0)),
+            quantity: Quantity(dec!(0.5)),
+            exchange: ExchangeId::from("test-exchange"),
+        };
+        assert_eq!(order.id, "order123");
+        assert_eq!(order.order_type, OrderType::Buy);
+    }
+
+    #[test]
+    fn test_trade_result_creation() {
+        let result = TradeResult {
+            order_id: "order123".to_string(),
+            status: TradeStatus::Filled,
+            filled_quantity: Quantity(dec!(0.5)),
+            filled_price: Some(Price(dec!(50000.0))),
+            message: None,
+        };
+        assert_eq!(result.status, TradeStatus::Filled);
+        assert_eq!(result.filled_quantity, Quantity(dec!(0.5)));
     }
 }

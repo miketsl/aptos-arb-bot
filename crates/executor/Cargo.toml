@@ -4,3 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+common = { path = "../common" }
+aptos-sdk = { git = "https://github.com/aptos-labs/aptos-core", branch = "devnet" }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+rand = "0.8"
+rust_decimal = "1.33"
+rust_decimal_macros = "1.33"
+
+[dev-dependencies]
+# tokio is already in [dependencies] with "full" features which covers testing needs.
