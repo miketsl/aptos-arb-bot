@@ -44,6 +44,16 @@ impl TradeSizer {
         Self::new(SizingConfig::default())
     }
 
+    /// Public getter for the SizingConfig's min_size.
+    pub fn min_size(&self) -> Decimal {
+        self.config.min_size
+    }
+
+    /// Public getter for the SizingConfig's slippage_cap.
+    pub fn slippage_cap(&self) -> f64 {
+        self.config.slippage_cap
+    }
+
     /// Calculates maximum trade size for an asset based on minimum liquidity edge.
     /// max_size(asset) = min_liquidity_edge(asset) × cfg.size_fraction
     pub fn calculate_max_size(&self, asset: &Asset, snapshot: &PriceGraphSnapshot) -> Decimal {
@@ -148,7 +158,7 @@ impl TradeSizer {
     }
 
     /// Calculates the exchange rate for a given amount on an edge.
-    fn calculate_rate(&self, edge: &Edge, amount_in: &Quantity) -> Option<f64> {
+    pub fn calculate_rate(&self, edge: &Edge, amount_in: &Quantity) -> Option<f64> {
         let amount_out = edge.quote(amount_in)?;
 
         if amount_in.0.is_zero() {
@@ -160,7 +170,7 @@ impl TradeSizer {
     }
 
     /// Calculates slippage percentage between base rate and current rate.
-    fn calculate_slippage(&self, base_rate: f64, current_rate: f64) -> f64 {
+    pub fn calculate_slippage(&self, base_rate: f64, current_rate: f64) -> f64 {
         if base_rate == 0.0 {
             return f64::INFINITY;
         }

@@ -98,9 +98,62 @@ impl Edge {
                 }
                 Some(Quantity(amount_out_val))
             }
-            PoolModel::ConcentratedLiquidity { .. } => {
-                // Complex logic, placeholder
-                None
+            PoolModel::ConcentratedLiquidity { ticks, fee_bps } => {
+                // Simplified CLMM Quoting Logic (Order-Book Style)
+                // Assumptions:
+                // 1. `ticks` are discrete price levels.
+                // 2. `Tick::price` is `asset_y / asset_x` (output per input).
+                // 3. `Tick::liquidity_gross` is the amount of `asset_x` available at that price.
+                // 4. Ticks are sorted to consume best prices first.
+                // 5. Fees are applied on input.
+
+                if amount_in.0.is_zero() {
+                    return None;
+                }
+
+                let fee_decimal =
+                    Decimal::from_u16(*fee_bps).unwrap_or_default() / Decimal::new(10000, 0);
+                let amount_in_after_fee = amount_in.0 * (Decimal::ONE - fee_decimal);
+
+                if amount_in_after_fee <= Decimal::ZERO {
+                    return None;
+                }
+
+                let mut remaining_to_swap = amount_in_after_fee;
+                let mut total_output_asset_y = Decimal::ZERO;
+
+                // Sort ticks by price descending to get the best rate first
+                // (more asset_y per asset_x)
+                let mut sorted_ticks = ticks.clone();
+                sorted_ticks.sort_by(|a, b| {
+                    b.price
+                        .partial_cmp(&a.price)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                for tick in sorted_ticks {
+                    if remaining_to_swap <= Decimal::ZERO {
+                        break;
+                    }
+                    // Ensure price and liquidity are valid
+                    if tick.price <= Decimal::ZERO || tick.liquidity_gross <= Decimal::ZERO {
+                        continue;
+                    }
+
+                    // Amount of asset_x that can be swapped at this tick's price
+                    let swappable_asset_x_at_tick = remaining_to_swap.min(tick.liquidity_gross);
+
+                    // Calculate asset_y output from this tick
+                    total_output_asset_y += swappable_asset_x_at_tick * tick.price;
+                    remaining_to_swap -= swappable_asset_x_at_tick;
+                }
+
+                if total_output_asset_y > Decimal::ZERO {
+                    Some(Quantity(total_output_asset_y))
+                } else {
+                    // No liquidity available or input amount too small
+                    None
+                }
             }
         }
     }

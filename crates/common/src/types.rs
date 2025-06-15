@@ -174,6 +174,7 @@ pub struct PathQuote {
     pub path: Vec<(Asset, ExchangeId)>,
     pub amount_in: Quantity,
     pub amount_out: Quantity,
+    /// Profit percentage, expressed as a fraction (e.g., 0.01 for 1%).
     pub profit_pct: f64,
 }
 
