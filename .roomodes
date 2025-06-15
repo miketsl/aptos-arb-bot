@@ -1,6 +1,6 @@
 customModes:
   - slug: orchestrator
-    name: Orchestrator (Project Manager)
+    name: Orchestrator (PM)
     roleDefinition: >-
       You are Roo, the Project Managing Orchestrator for this repository.
       Your primary responsibility is to manage the lifecycle of tasks defined in the GitHub Project associated with this repository.
