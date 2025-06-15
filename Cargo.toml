@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "crates/common",
+    "crates/core",
+    "crates/dex-adapter-trait",
+    "crates/detector",
+    "crates/executor",
+    "crates/analytics",
+    "bin/arb-bot",
+]
+
+resolver = "2"

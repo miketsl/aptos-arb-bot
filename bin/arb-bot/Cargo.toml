@@ -1,0 +1,12 @@
+[package]
+name = "arb-bot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../../crates/common" }
+core = { path = "../../crates/core" }
+dex-adapter-trait = { path = "../../crates/dex-adapter-trait" }
+detector = { path = "../../crates/detector" }
+executor = { path = "../../crates/executor" }
+analytics = { path = "../../crates/analytics" }
