@@ -124,6 +124,14 @@ gh project item-list <project_number_or_id> --owner <owner> --format json --jq '
 *   Example: `gh project item-list 2 --owner miketsl --format json --jq '.items[] | select(.content.url=="https://github.com/miketsl/aptos-arb-bot/issues/21")'`
 *   From the output of this command, you can find the `"id"` field, which is the **Item ID**.
 
+## Find only items that are not "Done" 
+The key fields in the output are:
+item.title: The title of the item on the project board.
+item.content.number: The issue number.
+item.content.url: The URL to the issue.
+item.status: The status of the item (e.g., "Todo", "In Progress", "Done").
+* Example: `gh project item-list 2 --owner miketsl --format json --jq '.items[] | select(.status != "Done") | {title: .title, number: .content.number, status: .status, url: .content.url, item_id: .id}'`
+
 ### Extract only the Item ID
 ```bash
 gh project item-list <project_number_or_id> --owner <owner> --format json --jq '.items[] | select(.content.url=="<issue_or_pr_url>") | .id'
