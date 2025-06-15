@@ -13,4 +13,5 @@ resolver = "2"
 
 [patch.crates-io]
 merlin = { git = "https://github.com/aptos-labs/merlin" }
-x25519-dalek = { git = "https://github.com/aptos-labs/x25519-dalek", branch = "zeroize_v1" }
+aptos-sdk = { git = "https://github.com/aptos-labs/aptos-core", branch = "devnet" }
+# x25519-dalek patch removed as it was unused and check passes

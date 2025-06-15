@@ -9,6 +9,10 @@ pub mod errors;
 /// Module for common data structures and types.
 pub mod types;
 
+/// Module for Aptos devnet test utilities.
+#[cfg(feature = "aptos-tests")] // Or simply #[cfg(test)] if only for tests within this crate
+pub mod aptos_test_utils;
+
 // Re-export key items for easier access.
 pub use errors::CommonError;
 pub use types::{Asset, AssetPair, ExchangeId, Price, Quantity};
