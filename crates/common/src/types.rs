@@ -1,5 +1,5 @@
-use std::fmt;
 use rust_decimal::Decimal;
+use std::fmt;
 
 /// Represents a price, typically using a high-precision decimal type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -74,7 +74,6 @@ impl From<&str> for ExchangeId {
         ExchangeId(s.to_string())
     }
 }
-
 
 #[cfg(test)]
 mod tests {

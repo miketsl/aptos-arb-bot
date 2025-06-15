@@ -1,6 +1,7 @@
 //! Main runtime for the arbitrage bot.
 
-fn main() {core::init();
+fn main() {
+    core::init();
     dex_adapter_trait::init();
     detector::init();
     executor::init();

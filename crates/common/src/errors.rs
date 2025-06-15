@@ -50,16 +50,22 @@ mod tests {
         assert_eq!(format!("{}", err), "Invalid configuration: Missing API key");
     }
 
-     #[test]
+    #[test]
     fn test_external_service_error_display() {
         let err = CommonError::ExternalServiceError("Rate limit exceeded".to_string());
-        assert_eq!(format!("{}", err), "External service error: Rate limit exceeded");
+        assert_eq!(
+            format!("{}", err),
+            "External service error: Rate limit exceeded"
+        );
     }
 
     #[test]
     fn test_unexpected_error_display() {
         let err = CommonError::UnexpectedError("Something went wrong".to_string());
-        assert_eq!(format!("{}", err), "An unexpected error occurred: Something went wrong");
+        assert_eq!(
+            format!("{}", err),
+            "An unexpected error occurred: Something went wrong"
+        );
     }
 
     #[test]

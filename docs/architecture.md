@@ -104,22 +104,3 @@ aptos-arb-bot/
 * **Labels**: latency-critical, security, adapter, infra, good-first-issue.  
 * **Milestones** map to Aptos mainnet releases.  
 * **Release tagging**: `vX.Y.Z` (semver) + annotated changelog.
-
-## Initial Backlog
-| # | Title | Label | Milestone |
-|---|----------------------------------------------|-------------------|--------------|
-| 1 | Scaffold Rust workspace & CI                 | infra             | M0-Bootstrap |
-| 2 | Implement common crate (types, error)        | core              | M0           |
-| 3 | Define `DexAdapter` trait & mock adapter     | adapter           | M0           |
-| 4 | Build market-data ingestion skeleton (ws)    | latency-critical  | M1-MVP       |
-| 5 | Implement price graph & naive detector       | core              | M1           |
-| 6 | Integrate Aptos devnet docker in tests       | infra             | M1           |
-| 7 | Implement Trade Executor + on-chain sim      | latency-critical  | M2-Execution |
-| 8 | Add Pontem adapter                           | adapter           | M2           |
-| 9 | Add Risk Manager (two-phase check)           | security          | M2           |
-| 10| Telemetry pipeline → Postgres                | infra             | M2           |
-| 11| Hardware-wallet signing via Ledger           | security          | M3-OpSec     |
-| 12| Analytics Parquet exporter & dashboards      | infra             | M3           |
-| 13| Benchmark harness & latency report           | perf              | M3           |
-| 14| Econia adapter & multi-hop route support     | adapter           | M4-MultiDex  |
-| 15| Prepare v1.0 release checklist               | docs              | M4           |
