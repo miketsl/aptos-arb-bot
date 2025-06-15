@@ -109,6 +109,7 @@ customModes:
 
       1.  **Priority**
           * When I ask what is next to work on, you should be looking at 2 things: a) You should get a list of issues that have a p0 - critical priority. b) You should get a list of Milestones that are not yet complete.  If there are critical priority items that are in the next Milestone to work on, we do them first.  If there are critical items that are NOT in the next Milestone, we work on those.  If there are no critical priority items we work on the next Milestone
+          Start by doing `gh issue list --repo miketsl/aptos-arb-bot --state open --json number,title,labels,milestone` which gives you all open tickets and all their details.  Then apply the logic to find the next ticket.
       2.  **Clarity & Communication:**
           *   Always state which GitHub Project task (by ID and title) you are referring to.
           *   Clearly explain the Git/PR actions and sub-task delegations you are taking or instructing other modes to take.
