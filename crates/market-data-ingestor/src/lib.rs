@@ -32,7 +32,7 @@ pub enum IngestorError {
     #[error("WebSocket URL parse error: {0}")]
     UrlParseError(#[from] url::ParseError),
     #[error("WebSocket error: {0}")]
-    WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocketError(Box<tokio_tungstenite::tungstenite::Error>),
     #[error("JSON deserialization error: {0}")]
     JsonError(#[from] serde_json::Error),
     #[error("IO error: {0}")]
@@ -41,6 +41,12 @@ pub enum IngestorError {
     HandlerError(String), // To wrap errors from the handler callback
     #[error("Stream ended unexpectedly")]
     StreamEnded,
+}
+
+impl From<tokio_tungstenite::tungstenite::Error> for IngestorError {
+    fn from(err: tokio_tungstenite::tungstenite::Error) -> Self {
+        IngestorError::WebSocketError(Box::new(err))
+    }
 }
 
 pub struct WebSocketIngestor {
@@ -134,7 +140,7 @@ impl WebSocketIngestor {
                             // More robust retry logic (e.g. exponential backoff) would be needed for production.
                             if let Err(reconnect_err) = self.connect().await {
                                 error!("Failed to reconnect: {}", reconnect_err);
-                                return Err(IngestorError::WebSocketError(e)); // Return original error
+                                return Err(IngestorError::WebSocketError(Box::new(e))); // Return original error
                             }
                             // If reconnect succeeds, the next iteration of the loop will use the new stream.
                             // However, the current 'stream.next()' was on the old, failed stream.
@@ -142,7 +148,7 @@ impl WebSocketIngestor {
                             // For simplicity in skeleton, we return the original error,
                             // implying the run loop terminates on such an error.
                             error!("Connection lost and reconnect attempted. Terminating run loop with original error: {}", e);
-                            return Err(IngestorError::WebSocketError(e));
+                            return Err(IngestorError::WebSocketError(Box::new(e)));
                         }
                     }
                 }
