@@ -1,8 +1,8 @@
 use crate::prelude::*;
 use common::types::{Asset, ExchangeId, Quantity, TradingPair};
 use petgraph::graphmap::DiGraphMap;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -54,19 +54,22 @@ pub struct Edge {
 // If Edge were a node, it would need Eq and Hash.
 impl PartialEq for Edge {
     fn eq(&self, other: &Self) -> bool {
-        self.pair == other.pair &&
-        self.exchange == other.exchange &&
-        self.model == other.model &&
-        self.last_updated == other.last_updated // Note: Instant comparison is fine
+        self.pair == other.pair
+            && self.exchange == other.exchange
+            && self.model == other.model
+            && self.last_updated == other.last_updated // Note: Instant comparison is fine
     }
 }
-
 
 impl Edge {
     /// Calculates the output amount for a given input amount based on the pool model.
     pub fn quote(&self, amount_in: &Quantity) -> Option<Quantity> {
         match &self.model {
-            PoolModel::ConstantProduct { reserve_x, reserve_y, fee_bps } => {
+            PoolModel::ConstantProduct {
+                reserve_x,
+                reserve_y,
+                fee_bps,
+            } => {
                 // For tuple struct Quantity, we can't check asset directly
                 // The caller must ensure the asset matches
 
@@ -78,14 +81,19 @@ impl Edge {
                 let reserve_x_val = reserve_x.0;
                 let reserve_y_val = reserve_y.0;
 
-                let fee_decimal = Decimal::from_u16(*fee_bps).unwrap_or_default() / Decimal::new(10000, 0);
+                let fee_decimal =
+                    Decimal::from_u16(*fee_bps).unwrap_or_default() / Decimal::new(10000, 0);
                 let amount_in_after_fee = amount_in_val * (Decimal::ONE - fee_decimal);
 
                 // Classic CPMM: (x + dx_eff) * (y - dy) = x * y
                 // dy = y * dx_eff / (x + dx_eff)
-                let amount_out_val = (reserve_y_val * amount_in_after_fee) / (reserve_x_val + amount_in_after_fee);
+                let amount_out_val =
+                    (reserve_y_val * amount_in_after_fee) / (reserve_x_val + amount_in_after_fee);
 
-                if amount_out_val.is_sign_negative() || amount_out_val.is_zero() || amount_out_val > reserve_y_val {
+                if amount_out_val.is_sign_negative()
+                    || amount_out_val.is_zero()
+                    || amount_out_val > reserve_y_val
+                {
                     return None; // Not enough liquidity or invalid amount
                 }
                 Some(Quantity(amount_out_val))
@@ -103,6 +111,7 @@ impl Edge {
 pub struct PriceGraphSnapshot {
     graph: DiGraphMap<AssetId, Edge>,
     asset_mapping: HashMap<AssetId, Asset>,
+    #[allow(dead_code)]
     reverse_mapping: HashMap<Asset, AssetId>,
 }
 
@@ -138,7 +147,10 @@ pub trait PriceGraph {
 
     /// Returns an iterator over the neighbors of a given asset and the edges leading to them.
     /// Neighbors are assets reachable directly from the given `asset`.
-    fn neighbors<'a>(&'a self, asset: &Asset) -> Box<dyn Iterator<Item = (&'a Asset, &'a Edge)> + 'a>;
+    fn neighbors<'a>(
+        &'a self,
+        asset: &Asset,
+    ) -> Box<dyn Iterator<Item = (&'a Asset, &'a Edge)> + 'a>;
 
     /// Returns an immutable snapshot of the current graph state.
     fn snapshot(&self) -> PriceGraphSnapshot;
@@ -210,12 +222,15 @@ impl PriceGraph for PriceGraphImpl {
         }
     }
 
-    fn neighbors<'a>(&'a self, asset: &Asset) -> Box<dyn Iterator<Item = (&'a Asset, &'a Edge)> + 'a> {
+    fn neighbors<'a>(
+        &'a self,
+        asset: &Asset,
+    ) -> Box<dyn Iterator<Item = (&'a Asset, &'a Edge)> + 'a> {
         if let Some(&asset_id) = self.reverse_mapping.get(asset) {
             Box::new(
                 self.graph
                     .edges(asset_id)
-                    .map(|(_, target_id, edge_data)| (&self.asset_mapping[&target_id], edge_data))
+                    .map(|(_, target_id, edge_data)| (&self.asset_mapping[&target_id], edge_data)),
             )
         } else {
             Box::new(std::iter::empty())
@@ -238,13 +253,23 @@ mod tests {
     use rust_decimal_macros::dec;
     use std::str::FromStr;
 
+    fn usdc_asset() -> Asset {
+        Asset::from_str("0x1::coin::USDC").unwrap()
+    }
+    fn apt_asset() -> Asset {
+        Asset::from_str("0x1::aptos_coin::AptosCoin").unwrap()
+    }
+    fn eth_asset() -> Asset {
+        Asset::from_str("0x1::coin::ETH").unwrap()
+    }
 
-    fn usdc_asset() -> Asset { Asset::from_str("0x1::coin::USDC").unwrap() }
-    fn apt_asset() -> Asset { Asset::from_str("0x1::aptos_coin::AptosCoin").unwrap() }
-    fn eth_asset() -> Asset { Asset::from_str("0x1::coin::ETH").unwrap() }
-
-
-    fn create_test_edge(asset_x: Asset, asset_y: Asset, reserve_x_val: Decimal, reserve_y_val: Decimal, fee_bps: u16) -> Edge {
+    fn create_test_edge(
+        asset_x: Asset,
+        asset_y: Asset,
+        reserve_x_val: Decimal,
+        reserve_y_val: Decimal,
+        fee_bps: u16,
+    ) -> Edge {
         Edge {
             pair: TradingPair {
                 asset_x: asset_x.clone(),
@@ -264,13 +289,13 @@ mod tests {
     fn test_upsert_and_snapshot() {
         let mut graph = PriceGraphImpl::new();
         let edge1 = create_test_edge(usdc_asset(), apt_asset(), dec!(1000), dec!(100), 30);
-        
+
         graph.upsert_edge(edge1.clone());
-        
+
         let snapshot = graph.snapshot();
         assert_eq!(snapshot.edge_count(), 1);
         assert_eq!(snapshot.node_count(), 2);
-        
+
         let (_, _, retrieved_edge) = snapshot.all_edges().next().unwrap();
         assert_eq!(retrieved_edge.pair, edge1.pair);
     }
@@ -280,9 +305,9 @@ mod tests {
         let mut graph = PriceGraphImpl::new();
         let edge1 = create_test_edge(usdc_asset(), apt_asset(), dec!(1000), dec!(100), 30);
         let edge2 = create_test_edge(apt_asset(), eth_asset(), dec!(50), dec!(1), 30);
-        
+
         graph.ingest_batch(vec![edge1, edge2]);
-        
+
         let snapshot = graph.snapshot();
         assert_eq!(snapshot.edge_count(), 2);
         assert_eq!(snapshot.node_count(), 3);
@@ -293,14 +318,14 @@ mod tests {
         let mut graph = PriceGraphImpl::new();
         let fresh_edge = create_test_edge(usdc_asset(), apt_asset(), dec!(1000), dec!(100), 30);
         let mut stale_edge = create_test_edge(apt_asset(), eth_asset(), dec!(50), dec!(1), 30);
-        
+
         stale_edge.last_updated = Instant::now() - Duration::from_secs(10);
-        
+
         graph.upsert_edge(fresh_edge.clone());
         graph.upsert_edge(stale_edge.clone());
-        
+
         assert_eq!(graph.snapshot().edge_count(), 2);
-        
+
         graph.prune_stale(Duration::from_secs(5));
         let snapshot = graph.snapshot();
         assert_eq!(snapshot.edge_count(), 1);
@@ -323,10 +348,14 @@ mod tests {
 
         let usdc_neighbors: Vec<_> = graph.neighbors(&usdc_asset()).collect();
         assert_eq!(usdc_neighbors.len(), 2);
-        
+
         // Check if APT and ETH are neighbors of USDC
-        let has_apt_neighbor = usdc_neighbors.iter().any(|(asset, edge)| *asset == &apt_asset() && edge.pair == edge_usdc_apt.pair);
-        let has_eth_neighbor = usdc_neighbors.iter().any(|(asset, edge)| *asset == &eth_asset() && edge.pair == edge_usdc_eth.pair);
+        let has_apt_neighbor = usdc_neighbors
+            .iter()
+            .any(|(asset, edge)| *asset == &apt_asset() && edge.pair == edge_usdc_apt.pair);
+        let has_eth_neighbor = usdc_neighbors
+            .iter()
+            .any(|(asset, edge)| *asset == &eth_asset() && edge.pair == edge_usdc_eth.pair);
         assert!(has_apt_neighbor);
         assert!(has_eth_neighbor);
 
@@ -338,19 +367,18 @@ mod tests {
         let eth_neighbors: Vec<_> = graph.neighbors(&eth_asset()).collect();
         assert_eq!(eth_neighbors.len(), 0);
     }
-    
+
     #[test]
     fn test_edge_quote_simple_cpmm() {
         // USDC -> APT pool
         let edge = create_test_edge(usdc_asset(), apt_asset(), dec!(10000), dec!(1000), 25); // 0.25% fee
 
         // Quote selling 100 USDC for APT
-        let amount_in_usdc = Quantity { asset: usdc_asset(), amount: dec!(100) };
+        let amount_in_usdc = Quantity(dec!(100));
         let quote_result = edge.quote(&amount_in_usdc);
 
         assert!(quote_result.is_some());
         let amount_out_apt = quote_result.unwrap();
-        assert_eq!(amount_out_apt.asset, apt_asset());
 
         // Manual calculation:
         // fee = 100 * (25/10000) = 0.25 USDC
@@ -359,23 +387,24 @@ mod tests {
         // amount_out = reserve_y * amount_in_after_fee / (reserve_x + amount_in_after_fee)
         // amount_out = 1000 * 99.75 / (10000 + 99.75)
         // amount_out = 99750 / 10099.75 = 9.876479...
-        let expected_out = dec!(1000) * (dec!(100) * (Decimal::ONE - dec!(0.0025))) / (dec!(10000) + (dec!(100) * (Decimal::ONE - dec!(0.0025))));
-        assert_eq!(amount_out_apt.amount.round_dp(8), expected_out.round_dp(8));
+        let expected_out = dec!(1000) * (dec!(100) * (Decimal::ONE - dec!(0.0025)))
+            / (dec!(10000) + (dec!(100) * (Decimal::ONE - dec!(0.0025))));
+        assert_eq!(amount_out_apt.0.round_dp(8), expected_out.round_dp(8));
 
         // Quote selling asset not in pair (APT for APT)
-        let amount_in_apt_wrong = Quantity { asset: apt_asset(), amount: dec!(10) };
-        assert!(edge.quote(&amount_in_apt_wrong).is_none());
-         // Quote selling asset that is asset_y (APT for USDC, but edge is USDC -> APT)
-        let amount_in_apt_reverse = Quantity { asset: apt_asset(), amount: dec!(10) };
-        assert!(edge.quote(&amount_in_apt_reverse).is_none());
+        let amount_in_apt_wrong = Quantity(dec!(10));
+        assert!(edge.quote(&amount_in_apt_wrong).is_some()); // The quote function doesn't check asset type anymore
+                                                             // Quote selling asset that is asset_y (APT for USDC, but edge is USDC -> APT)
+        let amount_in_apt_reverse = Quantity(dec!(10));
+        assert!(edge.quote(&amount_in_apt_reverse).is_some()); // The quote function doesn't check asset type anymore
     }
 
-     #[test]
+    #[test]
     fn test_edge_quote_insufficient_liquidity() {
         let edge = create_test_edge(usdc_asset(), apt_asset(), dec!(100), dec!(10), 25);
-        
+
         // Try to swap more than available in reserve_x after fee
-        let large_amount_in = Quantity { asset: usdc_asset(), amount: dec!(10000) };
+        let large_amount_in = Quantity(dec!(10000));
         let quote_result = edge.quote(&large_amount_in);
         // The formula itself might not show this as an error directly unless output is > reserve_y
         // Let's test if output is greater than reserve_y
@@ -383,15 +412,15 @@ mod tests {
         // amount_out = 10 * 9975 / (100 + 9975) = 99750 / 10075 = 9.9007...
         // This is valid and < 10.
         assert!(quote_result.is_some());
-        assert!(quote_result.unwrap().amount <= dec!(10));
-
+        assert!(quote_result.unwrap().0 <= dec!(10));
 
         // Test with zero reserve
         let zero_reserve_edge = create_test_edge(usdc_asset(), apt_asset(), dec!(0), dec!(10), 25);
-        let amount_in = Quantity { asset: usdc_asset(), amount: dec!(10) };
+        let amount_in = Quantity(dec!(10));
         assert!(zero_reserve_edge.quote(&amount_in).is_none());
 
-        let zero_reserve_edge_y = create_test_edge(usdc_asset(), apt_asset(), dec!(10), dec!(0), 25);
+        let zero_reserve_edge_y =
+            create_test_edge(usdc_asset(), apt_asset(), dec!(10), dec!(0), 25);
         assert!(zero_reserve_edge_y.quote(&amount_in).is_none());
     }
 }

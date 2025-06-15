@@ -39,7 +39,7 @@ impl From<&str> for Asset {
 
 impl std::str::FromStr for Asset {
     type Err = std::convert::Infallible;
-    
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Asset(s.to_string()))
     }
@@ -94,10 +94,7 @@ impl ExchangeId {
     }
 }
 
-/// Represents a liquidity pool coin type.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-
-
+/// Represents a trading pair between two assets.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TradingPair {
     pub asset_x: Asset,
