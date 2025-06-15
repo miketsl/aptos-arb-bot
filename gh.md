@@ -83,9 +83,9 @@ gh pr create --repo <owner>/<repo> --base <base_branch> --head <feature_branch> 
 
 ### View a Pull Request
 ```bash
-gh pr view <pr_number_or_url> --repo <owner>/<repo> --json state,merged,url,title,body,headRefName
+gh pr view <pr_number_or_url> --repo <owner>/<repo> --json state,mergedAt,url,title,body,headRefName
 ```
-*   Example: `gh pr view 25 --repo miketsl/aptos-arb-bot --json state,merged`
+*   Example: `gh pr view 25 --repo miketsl/aptos-arb-bot --json state,mergedAt`
 
 ### List Pull Requests (e.g., to check if one exists for a branch)
 ```bash
@@ -132,7 +132,7 @@ gh project item-list <project_number_or_id> --owner <owner> --format json --jq '
 
 ### List Project Fields (to find Field ID for "Status" and Option IDs for its values)
 ```bash
-gh project field-list <project_number_or_id> --owner <owner> --format json
+gh project field-list <project_number> --owner <owner> --format json
 ```
 *   Example: `gh project field-list 2 --owner miketsl --format json`
 *   Parse the JSON output:
