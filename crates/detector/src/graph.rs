@@ -1,11 +1,20 @@
 use crate::prelude::*;
-use aptos_sdk::types::account_address::AccountAddress;
 use common::types::{Asset, ExchangeId, Quantity, TradingPair};
 use petgraph::graphmap::DiGraphMap;
 use rust_decimal::Decimal;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use rust_decimal::prelude::FromPrimitive;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+/// A copyable asset identifier for use as DiGraphMap node
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AssetId(u64);
+
+impl AssetId {
+    fn new(id: u64) -> Self {
+        AssetId(id)
+    }
+}
 
 /// Represents the model of a liquidity pool.
 #[derive(Debug, Clone, PartialEq)]
@@ -90,7 +99,30 @@ impl Edge {
 }
 
 /// A snapshot of the price graph, which is an immutable copy.
-pub type PriceGraphSnapshot = DiGraphMap<Asset, Edge>;
+#[derive(Clone, Debug)]
+pub struct PriceGraphSnapshot {
+    graph: DiGraphMap<AssetId, Edge>,
+    asset_mapping: HashMap<AssetId, Asset>,
+    reverse_mapping: HashMap<Asset, AssetId>,
+}
+
+impl PriceGraphSnapshot {
+    pub fn edge_count(&self) -> usize {
+        self.graph.edge_count()
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.graph.node_count()
+    }
+
+    pub fn all_edges(&self) -> impl Iterator<Item = (&Asset, &Asset, &Edge)> + '_ {
+        self.graph.all_edges().map(|(source_id, target_id, edge)| {
+            let source_asset = &self.asset_mapping[&source_id];
+            let target_asset = &self.asset_mapping[&target_id];
+            (source_asset, target_asset, edge)
+        })
+    }
+}
 
 /// Defines the interface for a price graph.
 pub trait PriceGraph {
@@ -108,7 +140,6 @@ pub trait PriceGraph {
     /// Neighbors are assets reachable directly from the given `asset`.
     fn neighbors<'a>(&'a self, asset: &Asset) -> Box<dyn Iterator<Item = (&'a Asset, &'a Edge)> + 'a>;
 
-
     /// Returns an immutable snapshot of the current graph state.
     fn snapshot(&self) -> PriceGraphSnapshot;
 }
@@ -116,13 +147,31 @@ pub trait PriceGraph {
 /// Implementation of the `PriceGraph` trait using `petgraph::graphmap::DiGraphMap`.
 #[derive(Clone, Debug)]
 pub struct PriceGraphImpl {
-    graph: DiGraphMap<Asset, Edge>, // Asset is NodeId, Edge is EdgeWeight
+    graph: DiGraphMap<AssetId, Edge>,
+    asset_mapping: HashMap<AssetId, Asset>,
+    reverse_mapping: HashMap<Asset, AssetId>,
+    next_id: u64,
 }
 
 impl PriceGraphImpl {
     pub fn new() -> Self {
         PriceGraphImpl {
             graph: DiGraphMap::new(),
+            asset_mapping: HashMap::new(),
+            reverse_mapping: HashMap::new(),
+            next_id: 0,
+        }
+    }
+
+    fn get_or_create_asset_id(&mut self, asset: &Asset) -> AssetId {
+        if let Some(&asset_id) = self.reverse_mapping.get(asset) {
+            asset_id
+        } else {
+            let asset_id = AssetId::new(self.next_id);
+            self.next_id += 1;
+            self.asset_mapping.insert(asset_id, asset.clone());
+            self.reverse_mapping.insert(asset.clone(), asset_id);
+            asset_id
         }
     }
 }
@@ -135,10 +184,9 @@ impl Default for PriceGraphImpl {
 
 impl PriceGraph for PriceGraphImpl {
     fn upsert_edge(&mut self, edge: Edge) {
-        // An edge in our context is directed from pair.asset_x to pair.asset_y
-        // DiGraphMap's add_edge handles updates if an edge between these nodes already exists.
-        // The Edge struct itself is the weight.
-        self.graph.add_edge(edge.pair.asset_x.clone(), edge.pair.asset_y.clone(), edge);
+        let source_id = self.get_or_create_asset_id(&edge.pair.asset_x);
+        let target_id = self.get_or_create_asset_id(&edge.pair.asset_y);
+        self.graph.add_edge(source_id, target_id, edge);
     }
 
     fn ingest_batch(&mut self, edges: Vec<Edge>) {
@@ -151,41 +199,44 @@ impl PriceGraph for PriceGraphImpl {
         let now = Instant::now();
         let mut edges_to_remove = Vec::new();
 
-        for (source, target, edge_data) in self.graph.all_edges() {
+        for (source_id, target_id, edge_data) in self.graph.all_edges() {
             if now.duration_since(edge_data.last_updated) > ttl {
-                edges_to_remove.push((source.clone(), target.clone()));
+                edges_to_remove.push((source_id, target_id));
             }
         }
 
-        for (source, target) in edges_to_remove {
-            // DiGraphMap removes the edge based on nodes. If multiple edges (not possible with DiGraphMap by default for same pair)
-            // or if we need to identify by more than just nodes, this would be complex.
-            // But since Edge is the weight, and add_edge overwrites, this should be fine.
-            // remove_edge takes source and target.
-            self.graph.remove_edge(source, target);
+        for (source_id, target_id) in edges_to_remove {
+            self.graph.remove_edge(source_id, target_id);
         }
     }
 
     fn neighbors<'a>(&'a self, asset: &Asset) -> Box<dyn Iterator<Item = (&'a Asset, &'a Edge)> + 'a> {
-        // .edges(node) gives iterator over (source, target, weight) for outgoing edges
-        // We want (neighbor_asset, edge_data)
-        Box::new(self.graph.edges(asset.clone()).map(|(_, target_asset, edge_data)| (target_asset, edge_data)))
+        if let Some(&asset_id) = self.reverse_mapping.get(asset) {
+            Box::new(
+                self.graph
+                    .edges(asset_id)
+                    .map(|(_, target_id, edge_data)| (&self.asset_mapping[&target_id], edge_data))
+            )
+        } else {
+            Box::new(std::iter::empty())
+        }
     }
-    
 
     fn snapshot(&self) -> PriceGraphSnapshot {
-        self.graph.clone() // DiGraphMap with Clone nodes and weights is Cloneable
+        PriceGraphSnapshot {
+            graph: self.graph.clone(),
+            asset_mapping: self.asset_mapping.clone(),
+            reverse_mapping: self.reverse_mapping.clone(),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::types::{Asset, ExchangeId, Quantity, TradingPair};
+    use common::types::{Asset, ExchangeId, LpCoin, Quantity, TradingPair};
     use rust_decimal_macros::dec;
     use std::str::FromStr;
-    use std::thread::sleep;
-    use aptos_sdk::types::account_address::AccountAddress;
 
 
     fn usdc_asset() -> Asset { Asset::from_str("0x1::coin::USDC").unwrap() }
