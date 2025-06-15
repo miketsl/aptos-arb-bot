@@ -10,3 +10,8 @@ members = [
 ]
 
 resolver = "2"
+
+[patch.crates-io]
+merlin = { git = "https://github.com/aptos-labs/merlin" }
+aptos-sdk = { git = "https://github.com/aptos-labs/aptos-core", branch = "devnet" }
+# x25519-dalek patch removed as it was unused and check passes
