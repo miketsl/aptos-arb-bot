@@ -1,5 +1,5 @@
-use common::types::Asset;
 use async_trait::async_trait;
+use common::types::Asset;
 use std::error::Error;
 use std::fmt;
 
@@ -176,7 +176,11 @@ impl DexAdapter for MockDexAdapter {
         amount_in: u64,
         asset_in: &Asset,
     ) -> Result<Quote, DexAdapterError> {
-        if !self.supported_pairs.contains(pair) && !self.supported_pairs.contains(&TradingPair(pair.1.clone(), pair.0.clone())) {
+        if !self.supported_pairs.contains(pair)
+            && !self
+                .supported_pairs
+                .contains(&TradingPair(pair.1.clone(), pair.0.clone()))
+        {
             return Err(DexAdapterError::PairNotFound(pair.clone()));
         }
 
@@ -230,11 +234,18 @@ mod tests {
     use super::*;
     use common::types::Asset;
 
-    fn apt() -> Asset { Asset::from("APT") }
-    fn usdc() -> Asset { Asset::from("USDC") }
-    fn mojo() -> Asset { Asset::from("MOJO") }
-    fn usdt() -> Asset { Asset::from("USDT") }
-
+    fn apt() -> Asset {
+        Asset::from("APT")
+    }
+    fn usdc() -> Asset {
+        Asset::from("USDC")
+    }
+    fn mojo() -> Asset {
+        Asset::from("MOJO")
+    }
+    fn usdt() -> Asset {
+        Asset::from("USDT")
+    }
 
     #[tokio::test]
     async fn mock_adapter_get_supported_pairs() {
@@ -279,18 +290,17 @@ mod tests {
             assert_eq!(reported_pair, pair);
         }
     }
-     #[tokio::test]
+    #[tokio::test]
     async fn mock_adapter_get_quote_asset_not_in_pair() {
         let adapter = MockDexAdapter::new();
         let pair = TradingPair::new(apt(), usdc());
         // Try to get a quote for MOJO using the APT/USDC pair
         let result = adapter.get_quote(&pair, 100, &mojo()).await;
         assert!(matches!(result, Err(DexAdapterError::UnderlyingError(_))));
-         if let Err(DexAdapterError::UnderlyingError(msg)) = result {
+        if let Err(DexAdapterError::UnderlyingError(msg)) = result {
             assert!(msg.contains("Asset MOJO not found in pair APT/USDC"));
         }
     }
-
 
     #[tokio::test]
     async fn mock_adapter_swap_successful() {
@@ -299,7 +309,10 @@ mod tests {
         let amount_in: u64 = 50; // 50 APT
         let min_amount_out: u64 = 490; // Expect at least 490 USDC
 
-        let result = adapter.swap(&pair, amount_in, &apt(), min_amount_out).await.unwrap();
+        let result = adapter
+            .swap(&pair, amount_in, &apt(), min_amount_out)
+            .await
+            .unwrap();
 
         assert!(result.transaction_id.starts_with("mock_tx_"));
         assert_eq!(result.amount_out_received, 500); // 50 APT * 10 = 500 USDC
@@ -310,12 +323,15 @@ mod tests {
         let adapter = MockDexAdapter::new();
         let pair = TradingPair::new(apt(), usdc());
         let amount_in: u64 = 50; // 50 APT
-        // Expect at least 501 USDC, but mock quote will give 500
+                                 // Expect at least 501 USDC, but mock quote will give 500
         let min_amount_out: u64 = 501;
 
         let result = adapter.swap(&pair, amount_in, &apt(), min_amount_out).await;
-        assert!(matches!(result, Err(DexAdapterError::InsufficientLiquidity(_))));
-         if let Err(DexAdapterError::InsufficientLiquidity(reported_pair)) = result {
+        assert!(matches!(
+            result,
+            Err(DexAdapterError::InsufficientLiquidity(_))
+        ));
+        if let Err(DexAdapterError::InsufficientLiquidity(reported_pair)) = result {
             assert_eq!(reported_pair, pair);
         }
     }
