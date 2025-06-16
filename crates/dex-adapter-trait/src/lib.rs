@@ -1,22 +1,34 @@
 use async_trait::async_trait;
-use common::types::Asset;
+use common::types::{Asset, TradingPair};
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
+use std::str::FromStr;
 
-/// Represents a pair of assets for trading.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TradingPair(pub Asset, pub Asset);
+/// Represents a specific decentralized exchange.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Exchange {
+    Hyperion,
+    ThalaSwap,
+    Tapp,
+}
 
-impl TradingPair {
-    /// Creates a new trading pair.
-    pub fn new(asset1: Asset, asset2: Asset) -> Self {
-        TradingPair(asset1, asset2)
+impl FromStr for Exchange {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Hyperion" => Ok(Exchange::Hyperion),
+            "ThalaSwap" => Ok(Exchange::ThalaSwap),
+            "Tapp" => Ok(Exchange::Tapp),
+            _ => Err(()),
+        }
     }
 }
 
-impl fmt::Display for TradingPair {
+impl fmt::Display for Exchange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}", self.0, self.1)
+        write!(f, "{:?}", self)
     }
 }
 
@@ -83,6 +95,9 @@ impl Error for DexAdapterError {}
 /// obtain quotes for swaps, and execute swaps.
 #[async_trait]
 pub trait DexAdapter: Send + Sync {
+    /// Returns the specific `Exchange` this adapter is for.
+    fn exchange(&self) -> Exchange;
+
     /// Retrieves a list of all trading pairs supported by the DEX.
     ///
     /// # Returns
@@ -161,6 +176,10 @@ impl MockDexAdapter {
 
 #[async_trait]
 impl DexAdapter for MockDexAdapter {
+    fn exchange(&self) -> Exchange {
+        // Let's say the mock adapter represents Tapp for testing purposes
+        Exchange::Tapp
+    }
     /// Returns the predefined list of supported trading pairs.
     async fn get_supported_pairs(&self) -> Result<Vec<TradingPair>, DexAdapterError> {
         Ok(self.supported_pairs.clone())
@@ -177,14 +196,15 @@ impl DexAdapter for MockDexAdapter {
         asset_in: &Asset,
     ) -> Result<Quote, DexAdapterError> {
         if !self.supported_pairs.contains(pair)
-            && !self
-                .supported_pairs
-                .contains(&TradingPair(pair.1.clone(), pair.0.clone()))
+            && !self.supported_pairs.contains(&TradingPair::new(
+                pair.asset_y.clone(),
+                pair.asset_x.clone(),
+            ))
         {
             return Err(DexAdapterError::PairNotFound(pair.clone()));
         }
 
-        let (asset1, asset2) = (&pair.0, &pair.1);
+        let (asset1, asset2) = (&pair.asset_x, &pair.asset_y);
         let (expected_asset_out, ratio) = if asset_in == asset1 {
             (asset2.clone(), 10.0) // e.g., 1 asset1 = 10 asset2
         } else if asset_in == asset2 {
