@@ -54,10 +54,9 @@ pub struct Edge {
 // If Edge were a node, it would need Eq and Hash.
 impl PartialEq for Edge {
     fn eq(&self, other: &Self) -> bool {
-        self.pair == other.pair
-            && self.exchange == other.exchange
-            && self.model == other.model
-            && self.last_updated == other.last_updated // Note: Instant comparison is fine
+        // Equality should be deterministic and must **not** depend on wall-clock
+        // time. `last_updated` is therefore intentionally *excluded*.
+        self.pair == other.pair && self.exchange == other.exchange && self.model == other.model
     }
 }
 
@@ -249,9 +248,58 @@ impl Default for PriceGraphImpl {
 
 impl PriceGraph for PriceGraphImpl {
     fn upsert_edge(&mut self, edge: Edge) {
+        // ------------------------------------------------------------------
+        // Forward edge
+        // ------------------------------------------------------------------
         let source_id = self.get_or_create_asset_id(&edge.pair.asset_x);
         let target_id = self.get_or_create_asset_id(&edge.pair.asset_y);
-        self.graph.add_edge(source_id, target_id, edge);
+        self.graph.add_edge(source_id, target_id, edge.clone());
+
+        // ------------------------------------------------------------------
+        // Reverse edge – automatically inserted
+        // ------------------------------------------------------------------
+        let mut reverse_edge = edge.clone();
+
+        // 1️⃣  Swap trading-pair direction
+        reverse_edge.pair = TradingPair {
+            asset_x: edge.pair.asset_y.clone(),
+            asset_y: edge.pair.asset_x.clone(),
+        };
+
+        // 2️⃣  Transform pool model so that quoting logic stays correct
+        reverse_edge.model = match &edge.model {
+            PoolModel::ConstantProduct {
+                reserve_x,
+                reserve_y,
+                fee_bps,
+            } => PoolModel::ConstantProduct {
+                reserve_x: *reserve_y,
+                reserve_y: *reserve_x,
+                fee_bps: *fee_bps,
+            },
+            PoolModel::ConcentratedLiquidity { ticks, fee_bps } => {
+                // Invert every tick price (y/x  ->  x/y). Liquidity stays unchanged
+                let inverted_ticks = ticks
+                    .iter()
+                    .map(|t| Tick {
+                        price: if t.price.is_zero() {
+                            Decimal::ZERO
+                        } else {
+                            Decimal::ONE / t.price
+                        },
+                        liquidity_gross: t.liquidity_gross,
+                    })
+                    .collect();
+                PoolModel::ConcentratedLiquidity {
+                    ticks: inverted_ticks,
+                    fee_bps: *fee_bps,
+                }
+            }
+        };
+
+        let rev_src_id = self.get_or_create_asset_id(&reverse_edge.pair.asset_x);
+        let rev_tgt_id = self.get_or_create_asset_id(&reverse_edge.pair.asset_y);
+        self.graph.add_edge(rev_src_id, rev_tgt_id, reverse_edge);
     }
 
     fn ingest_batch(&mut self, edges: Vec<Edge>) {
@@ -346,11 +394,45 @@ mod tests {
         graph.upsert_edge(edge1.clone());
 
         let snapshot = graph.snapshot();
-        assert_eq!(snapshot.edge_count(), 1);
+        // Now expects 2 edges due to automatic reverse edge creation
+        assert_eq!(snapshot.edge_count(), 2);
         assert_eq!(snapshot.node_count(), 2);
 
-        let (_, _, retrieved_edge) = snapshot.all_edges().next().unwrap();
-        assert_eq!(retrieved_edge.pair, edge1.pair);
+        let mut found_forward = false;
+        let mut found_reverse = false;
+        for (_, _, retrieved_edge) in snapshot.all_edges() {
+            if retrieved_edge.pair == edge1.pair {
+                found_forward = true;
+            } else if retrieved_edge.pair.asset_x == edge1.pair.asset_y
+                && retrieved_edge.pair.asset_y == edge1.pair.asset_x
+            {
+                found_reverse = true;
+                // Check if reserves are swapped for CPMM
+                if let PoolModel::ConstantProduct {
+                    reserve_x,
+                    reserve_y,
+                    ..
+                } = &retrieved_edge.model
+                {
+                    if let PoolModel::ConstantProduct {
+                        reserve_x: orig_rx,
+                        reserve_y: orig_ry,
+                        ..
+                    } = &edge1.model
+                    {
+                        assert_eq!(reserve_x.0, orig_ry.0);
+                        assert_eq!(reserve_y.0, orig_rx.0);
+                    } else {
+                        panic!("Original edge not CPMM");
+                    }
+                } // Add similar check for CL if necessary
+            }
+        }
+        assert!(found_forward, "Forward edge not found");
+        assert!(
+            found_reverse,
+            "Reverse edge not found or model not correctly inverted"
+        );
     }
 
     #[test]
@@ -359,66 +441,117 @@ mod tests {
         let edge1 = create_test_edge(usdc_asset(), apt_asset(), dec!(1000), dec!(100), 30);
         let edge2 = create_test_edge(apt_asset(), eth_asset(), dec!(50), dec!(1), 30);
 
-        graph.ingest_batch(vec![edge1, edge2]);
+        // Each upsert creates a forward and reverse edge.
+        graph.ingest_batch(vec![edge1.clone(), edge2.clone()]);
 
         let snapshot = graph.snapshot();
-        assert_eq!(snapshot.edge_count(), 2);
+        assert_eq!(snapshot.edge_count(), 4); // 2 original + 2 reverse
         assert_eq!(snapshot.node_count(), 3);
     }
 
     #[test]
     fn test_prune_stale() {
         let mut graph = PriceGraphImpl::new();
-        let fresh_edge = create_test_edge(usdc_asset(), apt_asset(), dec!(1000), dec!(100), 30);
-        let mut stale_edge = create_test_edge(apt_asset(), eth_asset(), dec!(50), dec!(1), 30);
+        let fresh_edge_orig =
+            create_test_edge(usdc_asset(), apt_asset(), dec!(1000), dec!(100), 30);
+        let mut stale_edge_orig = create_test_edge(apt_asset(), eth_asset(), dec!(50), dec!(1), 30);
 
-        stale_edge.last_updated = Instant::now() - Duration::from_secs(10);
+        stale_edge_orig.last_updated = Instant::now() - Duration::from_secs(10);
+        // Also make its reverse counterpart (which will be created by upsert_edge) effectively stale
+        // by setting the original's last_updated before insertion.
+        // The reverse edge will clone this stale `last_updated` time.
 
-        graph.upsert_edge(fresh_edge.clone());
-        graph.upsert_edge(stale_edge.clone());
+        graph.upsert_edge(fresh_edge_orig.clone()); // Adds fresh_edge + its reverse (fresh)
+        graph.upsert_edge(stale_edge_orig.clone()); // Adds stale_edge + its reverse (stale)
 
-        assert_eq!(graph.snapshot().edge_count(), 2);
+        // Initial state: 2 fresh (orig + rev), 2 stale (orig + rev) = 4 edges
+        assert_eq!(graph.snapshot().edge_count(), 4);
 
         graph.prune_stale(Duration::from_secs(5));
-        let snapshot = graph.snapshot();
-        assert_eq!(snapshot.edge_count(), 1);
+        let snapshot_after_prune = graph.snapshot();
 
-        // Ensure the fresh edge remains
-        let (_, _, remaining_edge) = snapshot.all_edges().next().unwrap();
-        assert_eq!(remaining_edge.pair, fresh_edge.pair);
+        // Expected: stale_edge_orig and its reverse are pruned. fresh_edge_orig and its reverse remain.
+        assert_eq!(
+            snapshot_after_prune.edge_count(),
+            2,
+            "Pruning did not leave the correct number of edges."
+        );
+
+        // Ensure the fresh forward edge remains
+        let mut found_fresh_forward = false;
+        // Ensure the stale forward edge is gone
+        let mut found_stale_forward = false;
+
+        for (_, _, remaining_edge) in snapshot_after_prune.all_edges() {
+            if remaining_edge.pair == fresh_edge_orig.pair {
+                found_fresh_forward = true;
+            }
+            if remaining_edge.pair == stale_edge_orig.pair {
+                found_stale_forward = true;
+            }
+        }
+        assert!(found_fresh_forward, "Fresh forward edge was pruned");
+        assert!(!found_stale_forward, "Stale forward edge was not pruned");
     }
 
     #[test]
     fn test_neighbors() {
         let mut graph = PriceGraphImpl::new();
-        let edge_usdc_apt = create_test_edge(usdc_asset(), apt_asset(), dec!(1000), dec!(100), 30);
-        let edge_usdc_eth = create_test_edge(usdc_asset(), eth_asset(), dec!(2000), dec!(1), 25);
-        let edge_apt_eth = create_test_edge(apt_asset(), eth_asset(), dec!(50), dec!(0.5), 30);
+        let usdc = usdc_asset();
+        let apt = apt_asset();
+        let eth = eth_asset();
 
-        graph.upsert_edge(edge_usdc_apt.clone());
-        graph.upsert_edge(edge_usdc_eth.clone());
-        graph.upsert_edge(edge_apt_eth.clone());
+        let edge_usdc_apt = create_test_edge(usdc.clone(), apt.clone(), dec!(1000), dec!(100), 30);
+        let edge_apt_eth = create_test_edge(apt.clone(), eth.clone(), dec!(50), dec!(0.5), 30);
 
-        let usdc_neighbors: Vec<_> = graph.neighbors(&usdc_asset()).collect();
-        assert_eq!(usdc_neighbors.len(), 2);
+        graph.upsert_edge(edge_usdc_apt.clone()); // Adds USDC->APT and APT->USDC
+        graph.upsert_edge(edge_apt_eth.clone()); // Adds APT->ETH and ETH->APT
 
-        // Check if APT and ETH are neighbors of USDC
-        let has_apt_neighbor = usdc_neighbors
-            .iter()
-            .any(|(asset, edge)| *asset == &apt_asset() && edge.pair == edge_usdc_apt.pair);
-        let has_eth_neighbor = usdc_neighbors
-            .iter()
-            .any(|(asset, edge)| *asset == &eth_asset() && edge.pair == edge_usdc_eth.pair);
-        assert!(has_apt_neighbor);
-        assert!(has_eth_neighbor);
+        // Neighbors of USDC: should be APT (from USDC->APT)
+        let usdc_neighbors: Vec<_> = graph.neighbors(&usdc).collect();
+        assert_eq!(usdc_neighbors.len(), 1, "USDC should have 1 neighbor (APT)");
+        assert_eq!(usdc_neighbors[0].0, &apt); // Target asset
+        assert_eq!(usdc_neighbors[0].1.pair.asset_x, usdc); // Edge source
+        assert_eq!(usdc_neighbors[0].1.pair.asset_y, apt); // Edge target
 
-        let apt_neighbors: Vec<_> = graph.neighbors(&apt_asset()).collect();
-        assert_eq!(apt_neighbors.len(), 1);
-        assert_eq!(apt_neighbors[0].0, &eth_asset());
-        assert_eq!(apt_neighbors[0].1.pair, edge_apt_eth.pair);
+        // Neighbors of APT: should be USDC (from APT->USDC reverse) and ETH (from APT->ETH forward)
+        let apt_neighbors: Vec<_> = graph.neighbors(&apt).collect();
+        assert_eq!(
+            apt_neighbors.len(),
+            2,
+            "APT should have 2 neighbors (USDC, ETH)"
+        );
 
-        let eth_neighbors: Vec<_> = graph.neighbors(&eth_asset()).collect();
-        assert_eq!(eth_neighbors.len(), 0);
+        let has_usdc_as_neighbor_of_apt = apt_neighbors.iter().any(
+            |(neighbor_asset, edge_from_apt)| {
+                *neighbor_asset == &usdc && // Neighbor is USDC
+                edge_from_apt.pair.asset_x == apt && // Edge starts from APT
+                edge_from_apt.pair.asset_y == usdc
+            }, // Edge goes to USDC
+        );
+        assert!(
+            has_usdc_as_neighbor_of_apt,
+            "APT should have USDC as a neighbor (via reverse of usdc_apt)"
+        );
+
+        let has_eth_as_neighbor_of_apt = apt_neighbors.iter().any(
+            |(neighbor_asset, edge_from_apt)| {
+                *neighbor_asset == &eth && // Neighbor is ETH
+                edge_from_apt.pair.asset_x == apt && // Edge starts from APT
+                edge_from_apt.pair.asset_y == eth
+            }, // Edge goes to ETH
+        );
+        assert!(
+            has_eth_as_neighbor_of_apt,
+            "APT should have ETH as a neighbor (via apt_eth forward)"
+        );
+
+        // Neighbors of ETH: should be APT (from ETH->APT reverse)
+        let eth_neighbors: Vec<_> = graph.neighbors(&eth).collect();
+        assert_eq!(eth_neighbors.len(), 1, "ETH should have 1 neighbor (APT)");
+        assert_eq!(eth_neighbors[0].0, &apt); // Target asset
+        assert_eq!(eth_neighbors[0].1.pair.asset_x, eth); // Edge source
+        assert_eq!(eth_neighbors[0].1.pair.asset_y, apt); // Edge target
     }
 
     #[test]
@@ -475,5 +608,115 @@ mod tests {
         let zero_reserve_edge_y =
             create_test_edge(usdc_asset(), apt_asset(), dec!(10), dec!(0), 25);
         assert!(zero_reserve_edge_y.quote(&amount_in).is_none());
+    }
+
+    #[test]
+    fn test_upsert_concentrated_liquidity_edge_and_reverse() {
+        let mut graph = PriceGraphImpl::new();
+        let asset_a = Asset::from_str("ASSET_A").unwrap();
+        let asset_b = Asset::from_str("ASSET_B").unwrap();
+
+        let forward_ticks = vec![
+            Tick {
+                price: dec!(100),
+                liquidity_gross: dec!(10),
+            }, // 1 A = 100 B
+            Tick {
+                price: dec!(90),
+                liquidity_gross: dec!(5),
+            }, // 1 A = 90 B
+        ];
+
+        let cl_edge = Edge {
+            pair: TradingPair::new(asset_a.clone(), asset_b.clone()),
+            exchange: ExchangeId::pancakeswap_v3(),
+            model: PoolModel::ConcentratedLiquidity {
+                ticks: forward_ticks.clone(),
+                fee_bps: 10,
+            },
+            last_updated: Instant::now(),
+        };
+
+        graph.upsert_edge(cl_edge.clone());
+        let snapshot = graph.snapshot();
+        assert_eq!(snapshot.edge_count(), 2);
+
+        let mut found_forward_cl = false;
+        let mut found_reverse_cl = false;
+
+        for (s, t, edge) in snapshot.all_edges() {
+            if s == &asset_a && t == &asset_b {
+                found_forward_cl = true;
+                if let PoolModel::ConcentratedLiquidity { ticks, .. } = &edge.model {
+                    assert_eq!(ticks.len(), 2);
+                    // Assuming order is preserved from input for forward ticks
+                    assert_eq!(ticks[0].price, dec!(100));
+                    assert_eq!(ticks[1].price, dec!(90));
+                } else {
+                    panic!("Forward edge not CL");
+                }
+            } else if s == &asset_b && t == &asset_a {
+                found_reverse_cl = true;
+                if let PoolModel::ConcentratedLiquidity { ticks, .. } = &edge.model {
+                    assert_eq!(
+                        ticks.len(),
+                        2,
+                        "Reverse CL edge should have same number of ticks"
+                    );
+                    // Prices should be inverted: 1/100 and 1/90.
+                    // Check for presence of inverted prices, order might not be guaranteed
+                    // after potential internal sorting or transformations, though current logic preserves it.
+                    let expected_inverted_prices: Vec<Decimal> =
+                        vec![dec!(1) / dec!(100), dec!(1) / dec!(90)];
+                    let mut reverse_tick_prices: Vec<Decimal> =
+                        ticks.iter().map(|t| t.price).collect();
+                    reverse_tick_prices
+                        .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    let mut expected_sorted_inverted_prices = expected_inverted_prices;
+                    expected_sorted_inverted_prices
+                        .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+                    assert_eq!(
+                        reverse_tick_prices, expected_sorted_inverted_prices,
+                        "Reversed tick prices are incorrect: {:?}",
+                        ticks
+                    );
+
+                    // Check liquidity gross is preserved for corresponding original ticks (assuming order correspondence for simplicity here)
+                    // A more robust check would map original ticks to inverted ones if order isn't guaranteed.
+                    assert_eq!(
+                        ticks
+                            .iter()
+                            .find(|t| t.price == dec!(1) / dec!(100))
+                            .unwrap()
+                            .liquidity_gross,
+                        forward_ticks
+                            .iter()
+                            .find(|t| t.price == dec!(100))
+                            .unwrap()
+                            .liquidity_gross
+                    );
+                    assert_eq!(
+                        ticks
+                            .iter()
+                            .find(|t| t.price == dec!(1) / dec!(90))
+                            .unwrap()
+                            .liquidity_gross,
+                        forward_ticks
+                            .iter()
+                            .find(|t| t.price == dec!(90))
+                            .unwrap()
+                            .liquidity_gross
+                    );
+                } else {
+                    panic!("Reverse edge not CL");
+                }
+            }
+        }
+        assert!(found_forward_cl, "Forward CL edge not found");
+        assert!(
+            found_reverse_cl,
+            "Reverse CL edge not found or model not correctly inverted"
+        );
     }
 }

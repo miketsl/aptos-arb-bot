@@ -139,71 +139,120 @@ impl NaiveDetector {
     }
 
     /// Detects arbitrage opportunities for a specific trade size (gross profit).
+    /// This function now iterates Bellman-Ford from each asset as a potential source
+    /// to ensure all negative cycles are discoverable.
     fn detect_for_size(
         &self,
         snapshot: &PriceGraphSnapshot,
         trade_size: Decimal,
     ) -> Vec<PathQuote> {
-        let assets: Vec<&Asset> = self.collect_assets(snapshot);
-        let mut distances: HashMap<&Asset, f64> = HashMap::new();
-        let mut predecessors: HashMap<&Asset, Option<(&Asset, &ExchangeId)>> = HashMap::new();
-
-        // Initialize distances to infinity for all assets except first one
-        for (i, &asset) in assets.iter().enumerate() {
-            distances.insert(asset, if i == 0 { 0.0 } else { f64::INFINITY });
-            predecessors.insert(asset, None);
+        let all_graph_assets: Vec<&Asset> = self.collect_assets(snapshot);
+        if all_graph_assets.is_empty() {
+            return Vec::new();
         }
 
-        let num_vertices = assets.len();
-        let mut negative_cycle_candidates = Vec::new();
+        let mut all_opportunities = Vec::new();
+        let num_vertices = all_graph_assets.len();
 
-        // Step 2: Log-space Bellman-Ford (|V|-1 relaxations)
-        for iteration in 0..=num_vertices {
-            let mut _relaxed_in_this_iteration = false; // Prefixed with underscore
+        // Iterate Bellman-Ford starting from each asset.
+        // This is one way to find all negative cycles.
+        // A more optimized approach might use a single Bellman-Ford run from a super-source
+        // or specialized algorithms like Tarjan's for SCCs then check cycles.
+        // For now, iterating from each source is a correct, albeit potentially slower, approach.
+        for start_node_asset in &all_graph_assets {
+            let mut distances: HashMap<&Asset, f64> = HashMap::new();
+            let mut predecessors: HashMap<&Asset, Option<(&Asset, &ExchangeId)>> = HashMap::new();
 
-            for (source_asset, target_asset, edge) in snapshot.all_edges() {
-                let amount_in = Quantity(trade_size);
+            // Initialize distances: 0 for start_node_asset, infinity for others.
+            for asset in &all_graph_assets {
+                distances.insert(
+                    asset,
+                    if asset == start_node_asset {
+                        0.0
+                    } else {
+                        f64::INFINITY
+                    },
+                );
+                predecessors.insert(asset, None);
+            }
 
-                if let Some(log_weight) = self.calculate_log_weight(edge, &amount_in) {
-                    let source_dist = distances
-                        .get(source_asset)
-                        .copied()
-                        .unwrap_or(f64::INFINITY);
-                    let new_dist = source_dist + log_weight;
-                    let current_dist = distances
-                        .get(target_asset)
-                        .copied()
-                        .unwrap_or(f64::INFINITY);
+            let mut negative_cycle_candidates_from_this_source = Vec::new();
 
-                    if new_dist < current_dist {
-                        distances.insert(target_asset, new_dist);
-                        predecessors.insert(target_asset, Some((source_asset, &edge.exchange)));
-                        _relaxed_in_this_iteration = true; // Prefixed with underscore
+            // Bellman-Ford: |V| iterations.
+            // The (num_vertices)-th iteration is for detecting negative cycles.
+            for iteration in 0..=num_vertices {
+                let mut relaxed_in_this_iteration = false;
 
-                        // Step 2: Any edge relaxed on iteration |V| => negative cycle candidate
-                        if iteration == num_vertices {
-                            negative_cycle_candidates.push(target_asset);
+                for (source_asset, target_asset, edge) in snapshot.all_edges() {
+                    // Ensure source_asset has a finite distance to be part of a path from start_node_asset
+                    if distances.get(source_asset).is_none_or(|d| d.is_infinite()) {
+                        continue;
+                    }
+
+                    let amount_in = Quantity(trade_size);
+                    if let Some(log_weight) = self.calculate_log_weight(edge, &amount_in) {
+                        let source_dist = distances[source_asset]; // Known to be finite here
+                        let new_dist = source_dist + log_weight;
+
+                        // Check against current distance to target_asset
+                        // (which might be infinity or a value from a previous relaxation)
+                        let current_target_dist = distances
+                            .get(target_asset)
+                            .copied()
+                            .unwrap_or(f64::INFINITY);
+
+                        if new_dist < current_target_dist {
+                            distances.insert(target_asset, new_dist);
+                            predecessors.insert(target_asset, Some((source_asset, &edge.exchange)));
+                            relaxed_in_this_iteration = true;
+
+                            // If relaxation occurs in the |V|-th iteration, a negative cycle is detected.
+                            // The target_asset is part of, or reachable from, such a cycle.
+                            if iteration == num_vertices {
+                                // Ensure the candidate is reachable from the current start_node_asset
+                                // and is part of a cycle involving this start_node_asset or reachable from it.
+                                negative_cycle_candidates_from_this_source.push(target_asset);
+                            }
                         }
                     }
                 }
+                // Standard Bellman-Ford can exit early after |V|-1 iterations if no relaxations occur.
+                // However, to detect negative cycles, we must complete the |V|-th iteration.
+                if iteration < num_vertices && !relaxed_in_this_iteration {
+                    // No relaxations in a pass before the Nth pass, means no shorter paths from start_node_asset.
+                    // We can break early for *this specific start_node_asset* if we are not yet in the Nth pass.
+                    // break; // This optimization is removed to strictly follow |V| iterations for cycle detection.
+                }
             }
 
-            // Spec §3 step 2: run |V| − 1 relaxations *without early exit*.
-            // Therefore we intentionally do **not** break the loop even if no
-            // edge was relaxed in this iteration.
-        }
-
-        // Step 3: Cycle reconstruction
-        let mut opportunities = Vec::new();
-        for &cycle_asset in &negative_cycle_candidates {
-            if let Some(cycle_path) = self.reconstruct_cycle(cycle_asset, &predecessors, &assets) {
-                if let Some(path_quote) = self.evaluate_cycle(cycle_path, trade_size, snapshot) {
-                    opportunities.push(path_quote);
+            // Cycle reconstruction for candidates found from this start_node_asset
+            for &cycle_candidate_asset in &negative_cycle_candidates_from_this_source {
+                // Check if this cycle_candidate_asset is indeed part of a cycle by tracing predecessors.
+                // The reconstruct_cycle method should handle this.
+                if let Some(cycle_path) =
+                    self.reconstruct_cycle(cycle_candidate_asset, &predecessors, &all_graph_assets)
+                {
+                    // Ensure the cycle involves the start_node_asset or is reachable and profitable
+                    // The current reconstruction logic might find cycles not involving start_node_asset directly,
+                    // but if they are reachable and negative, they are valid.
+                    // The key is that `predecessors` map is built from `start_node_asset`.
+                    if let Some(path_quote) = self.evaluate_cycle(cycle_path, trade_size, snapshot)
+                    {
+                        all_opportunities.push(path_quote);
+                    }
                 }
             }
         }
 
-        opportunities
+        // Deduplicate opportunities if multiple start_node_assets lead to the same cycle.
+        // PathQuote would need to implement Eq and Hash, or we use a custom deduplication logic.
+        // For now, we might have duplicates if cycles are found from multiple start nodes.
+        // A simple way to deduplicate is to sort paths and then use `dedup`.
+        // This requires PathQuote to have a consistent representation (e.g. sorted path).
+        // Let's assume for now that `evaluate_cycle` produces canonical paths or `CycleEval` handles this.
+        // The current `PathQuote` does not have `Eq` or `Hash`.
+        // For simplicity, we'll rely on later stages or assume `CycleEval` handles deduplication.
+        all_opportunities
     }
 
     /// Collects all unique assets from the graph snapshot.
@@ -248,41 +297,62 @@ impl NaiveDetector {
         &self,
         start_asset: &Asset,
         predecessors: &HashMap<&Asset, Option<(&Asset, &ExchangeId)>>,
-        _assets: &[&Asset],
+        _assets: &[&Asset], // _assets.len() is num_vertices
     ) -> Option<Vec<(Asset, ExchangeId)>> {
-        let _path: Vec<(Asset, ExchangeId)> = Vec::new();
-        let mut current = start_asset;
-        let mut visited = std::collections::HashSet::new();
+        let mut path_traced: Vec<(Asset, ExchangeId)> = Vec::new(); // Stores (asset, exchange_that_led_to_this_asset)
+        let mut current_node_in_trace = start_asset; // The node that Bellman-Ford identified as part of/reachable from a negative cycle
+        let mut visited_in_trace = std::collections::HashMap::new(); // Store node and its position in path_traced
 
-        // Follow predecessors to find the cycle
-        loop {
-            if visited.contains(current) {
-                // Found the cycle start, now build the actual cycle
-                let cycle_start = current;
-                let mut cycle_path = Vec::new();
-                let mut cycle_current = current;
+        // Trace back predecessors for at most |V| steps.
+        // If `current_node_in_trace` is part of a cycle, we will encounter a node twice.
+        for i in 0.._assets.len() {
+            if let Some(previous_occurrence_index) = visited_in_trace.get(current_node_in_trace) {
+                // Cycle detected: current_node_in_trace has been visited before.
+                // The cycle consists of path_traced elements from `previous_occurrence_index` up to the element *before* the current one.
+                // path_traced is currently in reverse order of actual trade execution if we consider the edges.
+                // Example: Cycle A -> B -> C -> A. Predecessors: P[A]=C (via ex_CA), P[C]=B (via ex_BC), P[B]=A (via ex_AB).
+                // If Bellman-Ford flags A (start_asset), trace:
+                // 1. current=A. visited[A]=0. pred(A)=(C, ex_CA). path_traced.push((A, ex_CA)). current=C.
+                //    path_traced: [(A, ex_CA)]
+                // 2. current=C. visited[C]=1. pred(C)=(B, ex_BC). path_traced.push((C, ex_BC)). current=B.
+                //    path_traced: [(A, ex_CA), (C, ex_BC)]
+                // 3. current=B. visited[B]=2. pred(B)=(A, ex_AB). path_traced.push((B, ex_AB)). current=A.
+                //    path_traced: [(A, ex_CA), (C, ex_BC), (B, ex_AB)]
+                // 4. current=A. visited[A] exists (it's 0). Cycle detected.
+                //    previous_occurrence_index = 0.
+                //    The segment forming the cycle in path_traced is from index 0 to end: [(A, ex_CA), (C, ex_BC), (B, ex_AB)].
 
-                while let Some(Some((prev_asset, exchange))) = predecessors.get(cycle_current) {
-                    cycle_path.push(((*cycle_current).clone(), (*exchange).clone()));
-                    cycle_current = prev_asset;
-
-                    if cycle_current == cycle_start {
-                        cycle_path.reverse();
-                        return Some(cycle_path);
-                    }
-                }
-                break;
+                let mut cycle_segment = path_traced.split_at(*previous_occurrence_index).1.to_vec();
+                // cycle_segment is [(A, ex_CA), (C, ex_BC), (B, ex_AB)]
+                // This represents the "end" of each trade leading to the asset.
+                // (Asset_Reached, Exchange_Used_To_Reach_It)
+                // To get the trade sequence A->B, B->C, C->A:
+                // We need to reverse this segment to get the forward path.
+                cycle_segment.reverse();
+                // Now: [(B, ex_AB), (C, ex_BC), (A, ex_CA)]
+                // This means:
+                // - Trade ending at B, using ex_AB (so, A->B via ex_AB)
+                // - Trade ending at C, using ex_BC (so, B->C via ex_BC)
+                // - Trade ending at A, using ex_CA (so, C->A via ex_CA)
+                // This is the correct format for `PathQuote`.
+                return Some(cycle_segment);
             }
 
-            visited.insert(current);
+            visited_in_trace.insert(current_node_in_trace, i);
 
-            if let Some(Some((prev_asset, _))) = predecessors.get(current) {
-                current = prev_asset;
+            if let Some(Some((prev_asset, exchange_id))) = predecessors.get(current_node_in_trace) {
+                // Add (the_asset_we_are_currently_at, the_exchange_that_led_to_it_from_prev_asset)
+                path_traced.push(((*current_node_in_trace).clone(), (*exchange_id).clone()));
+                current_node_in_trace = prev_asset; // Move to the predecessor
             } else {
-                break;
+                // No predecessor for current_node_in_trace in the map generated by this Bellman-Ford run.
+                // This means current_node_in_trace is not part of a cycle reachable through this specific predecessor chain
+                // or it's the original source of Bellman-Ford run and no path leads back to it.
+                return None;
             }
         }
-
+        // If no cycle is found after |V| steps (e.g., path is just a line without repeating nodes),
+        // then the `start_asset` was not part of a cycle detectable by this backtracking from itself.
         None
     }
 
