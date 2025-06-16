@@ -1,5 +1,6 @@
 use crate::prelude::*;
-use common::types::{Asset, ExchangeId, Quantity, TradingPair};
+use common::types::{Asset, Quantity, TradingPair};
+use dex_adapter_trait::Exchange;
 use petgraph::graphmap::DiGraphMap;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
@@ -44,7 +45,7 @@ pub struct Tick {
 #[derive(Debug, Clone)]
 pub struct Edge {
     pub pair: TradingPair, // Defines direction: asset_x -> asset_y
-    pub exchange: ExchangeId,
+    pub exchange: Exchange,
     pub model: PoolModel,
     pub last_updated: Instant,
 }
@@ -358,7 +359,8 @@ impl PriceGraph for PriceGraphImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::types::{Asset, ExchangeId, Quantity, TradingPair};
+    use common::types::{Asset, Quantity, TradingPair};
+    use dex_adapter_trait::Exchange;
     use rust_decimal_macros::dec;
     use std::str::FromStr;
 
@@ -384,7 +386,7 @@ mod tests {
                 asset_x: asset_x.clone(),
                 asset_y: asset_y.clone(),
             },
-            exchange: ExchangeId::pancakeswap_v3(),
+            exchange: Exchange::Tapp, // Placeholder
             model: PoolModel::ConstantProduct {
                 reserve_x: Quantity(reserve_x_val),
                 reserve_y: Quantity(reserve_y_val),
@@ -646,7 +648,7 @@ mod tests {
 
         let cl_edge = Edge {
             pair: TradingPair::new(asset_a.clone(), asset_b.clone()),
-            exchange: ExchangeId::pancakeswap_v3(),
+            exchange: Exchange::Tapp, // Placeholder
             model: PoolModel::ConcentratedLiquidity {
                 ticks: forward_ticks.clone(),
                 fee_bps: 10,

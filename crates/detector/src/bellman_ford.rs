@@ -1,6 +1,7 @@
 //! Naive arbitrage detector using log-space Bellman-Ford algorithm.
 
 use crate::prelude::*;
+use dex_adapter_trait::Exchange;
 use rust_decimal::Decimal;
 use std::collections::{HashMap, HashSet}; // Added HashSet for deduplicating trade sizes
                                           // CycleEval is available via prelude
@@ -161,7 +162,7 @@ impl NaiveDetector {
         // For now, iterating from each source is a correct, albeit potentially slower, approach.
         for start_node_asset in &all_graph_assets {
             let mut distances: HashMap<&Asset, f64> = HashMap::new();
-            let mut predecessors: HashMap<&Asset, Option<(&Asset, &ExchangeId)>> = HashMap::new();
+            let mut predecessors: HashMap<&Asset, Option<(&Asset, &Exchange)>> = HashMap::new();
 
             // Initialize distances: 0 for start_node_asset, infinity for others.
             for asset in &all_graph_assets {
@@ -303,10 +304,10 @@ impl NaiveDetector {
     fn reconstruct_cycle(
         &self,
         start_asset: &Asset,
-        predecessors: &HashMap<&Asset, Option<(&Asset, &ExchangeId)>>,
+        predecessors: &HashMap<&Asset, Option<(&Asset, &Exchange)>>,
         _assets: &[&Asset], // _assets.len() is num_vertices
-    ) -> Option<Vec<(Asset, ExchangeId)>> {
-        let mut path_traced: Vec<(Asset, ExchangeId)> = Vec::new(); // Stores (asset, exchange_that_led_to_this_asset)
+    ) -> Option<Vec<(Asset, Exchange)>> {
+        let mut path_traced: Vec<(Asset, Exchange)> = Vec::new(); // Stores (asset, exchange_that_led_to_this_asset)
         let mut current_node_in_trace = start_asset; // The node that Bellman-Ford identified as part of/reachable from a negative cycle
         let mut visited_in_trace = std::collections::HashMap::new(); // Store node and its position in path_traced
 
@@ -366,7 +367,7 @@ impl NaiveDetector {
     /// Evaluates a cycle to calculate actual profit and checks for slippage.
     fn evaluate_cycle(
         &self,
-        cycle_path: Vec<(Asset, ExchangeId)>,
+        cycle_path: Vec<(Asset, Exchange)>,
         initial_amount: Decimal,
         snapshot: &PriceGraphSnapshot,
     ) -> Option<PathQuote> {
@@ -463,12 +464,12 @@ impl NaiveDetector {
         snapshot: &'a PriceGraphSnapshot,
         from_asset: &Asset,
         to_asset: &Asset,
-        exchange: &ExchangeId,
+        exchange: &Exchange,
     ) -> Option<&'a Edge> {
         snapshot
             .all_edges()
             .find(|(source, target, edge)| {
-                *source == from_asset && *target == to_asset && edge.exchange == *exchange
+                *source == from_asset && *target == to_asset && &edge.exchange == exchange
             })
             .map(move |(_, _, edge)| edge)
     }
@@ -478,6 +479,7 @@ impl NaiveDetector {
 mod tests {
     use super::*;
     use crate::graph::*;
+    use dex_adapter_trait::Exchange;
     use rust_decimal_macros::dec;
     use std::str::FromStr;
 
@@ -496,7 +498,7 @@ mod tests {
         // USDC -> APT (rate: 0.1, 10 USDC = 1 APT)
         let edge1 = Edge {
             pair: TradingPair::new(usdc.clone(), apt.clone()),
-            exchange: ExchangeId::pancakeswap_v3(),
+            exchange: Exchange::Tapp,
             model: PoolModel::ConstantProduct {
                 reserve_x: Quantity(dec!(10000)),
                 reserve_y: Quantity(dec!(1000)),
@@ -508,7 +510,7 @@ mod tests {
         // APT -> ETH (rate: 0.1, 10 APT = 1 ETH)
         let edge2 = Edge {
             pair: TradingPair::new(apt.clone(), eth.clone()),
-            exchange: ExchangeId::pancakeswap_v3(),
+            exchange: Exchange::Tapp,
             model: PoolModel::ConstantProduct {
                 reserve_x: Quantity(dec!(1000)),
                 reserve_y: Quantity(dec!(100)),
@@ -520,7 +522,7 @@ mod tests {
         // ETH -> USDC (rate: 105, 1 ETH = 105 USDC - this creates arbitrage)
         let edge3 = Edge {
             pair: TradingPair::new(eth.clone(), usdc.clone()),
-            exchange: ExchangeId::pancakeswap_v3(),
+            exchange: Exchange::Tapp,
             model: PoolModel::ConstantProduct {
                 reserve_x: Quantity(dec!(100)),
                 reserve_y: Quantity(dec!(10500)), // Slightly favorable rate
@@ -563,7 +565,7 @@ mod tests {
                 Asset::from_str("USDC").unwrap(),
                 Asset::from_str("APT").unwrap(),
             ),
-            exchange: ExchangeId::pancakeswap_v3(),
+            exchange: Exchange::Tapp,
             model: PoolModel::ConstantProduct {
                 reserve_x: Quantity(dec!(10000)),
                 reserve_y: Quantity(dec!(1000)),

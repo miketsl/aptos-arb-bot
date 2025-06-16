@@ -229,6 +229,7 @@ impl TradeSizer {
 mod tests {
     use super::*;
     use crate::graph::*;
+    use dex_adapter_trait::Exchange;
     use rust_decimal_macros::dec;
     use std::str::FromStr;
 
@@ -244,7 +245,7 @@ mod tests {
 
         let edge = Edge {
             pair: TradingPair::new(usdc.clone(), apt.clone()),
-            exchange: ExchangeId::pancakeswap_v3(),
+            exchange: Exchange::Tapp,
             model: PoolModel::ConstantProduct {
                 reserve_x: Quantity(dec!(10000)),
                 reserve_y: Quantity(dec!(1000)),
@@ -298,7 +299,7 @@ mod tests {
                 Asset::from_str("USDC").unwrap(),
                 Asset::from_str("APT").unwrap(),
             ),
-            exchange: ExchangeId::pancakeswap_v3(),
+            exchange: Exchange::Tapp,
             model: PoolModel::ConstantProduct {
                 reserve_x: Quantity(dec!(10000)),
                 reserve_y: Quantity(dec!(1000)),
@@ -345,7 +346,7 @@ mod tests {
                 Asset::from_str("USDC").unwrap(),
                 Asset::from_str("APT").unwrap(),
             ),
-            exchange: ExchangeId::pancakeswap_v3(),
+            exchange: Exchange::Tapp,
             model: PoolModel::ConstantProduct {
                 reserve_x: Quantity(dec!(10000)),
                 reserve_y: Quantity(dec!(1000)),
@@ -375,7 +376,7 @@ mod tests {
                 Asset::from_str("USDC").unwrap(),
                 Asset::from_str("APT").unwrap(),
             ),
-            exchange: ExchangeId::pancakeswap_v3(),
+            exchange: Exchange::Tapp,
             model: PoolModel::ConstantProduct {
                 reserve_x: Quantity(dec!(10000)),
                 reserve_y: Quantity(dec!(1000)),

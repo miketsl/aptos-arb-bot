@@ -15,7 +15,7 @@ pub mod aptos_test_utils;
 
 // Re-export key items for easier access.
 pub use errors::CommonError;
-pub use types::{Asset, AssetPair, ExchangeId, Price, Quantity};
+pub use types::{Asset, AssetPair, Price, Quantity};
 
 #[cfg(test)]
 mod tests {
