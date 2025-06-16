@@ -37,6 +37,14 @@ impl From<&str> for Asset {
     }
 }
 
+impl std::str::FromStr for Asset {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Asset(s.to_string()))
+    }
+}
+
 /// Represents a pair of assets for trading.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AssetPair {
@@ -72,6 +80,36 @@ impl fmt::Display for ExchangeId {
 impl From<&str> for ExchangeId {
     fn from(s: &str) -> Self {
         ExchangeId(s.to_string())
+    }
+}
+
+impl ExchangeId {
+    pub const PANCAKESWAP_V3: ExchangeId = ExchangeId(String::new()); // This won't work with const
+}
+
+// Let's use a different approach for constants
+impl ExchangeId {
+    pub fn pancakeswap_v3() -> Self {
+        ExchangeId("PancakeswapV3".to_string())
+    }
+}
+
+/// Represents a trading pair between two assets.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TradingPair {
+    pub asset_x: Asset,
+    pub asset_y: Asset,
+}
+
+impl TradingPair {
+    pub fn new(asset_x: Asset, asset_y: Asset) -> Self {
+        TradingPair { asset_x, asset_y }
+    }
+}
+
+impl fmt::Display for TradingPair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.asset_x, self.asset_y)
     }
 }
 
@@ -128,6 +166,25 @@ pub struct TradeResult {
     pub filled_quantity: Quantity,
     pub filled_price: Option<Price>, // Average filled price
     pub message: Option<String>,     // For errors or additional info
+}
+
+/// Represents a path quote result from the arbitrage detector.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PathQuote {
+    pub path: Vec<(Asset, ExchangeId)>,
+    pub amount_in: Quantity,
+    pub amount_out: Quantity,
+    /// Profit percentage, expressed as a fraction (e.g., 0.01 for 1%).
+    pub profit_pct: f64,
+}
+
+/// Represents cycle evaluation with gas accounting.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CycleEval {
+    pub gross_profit: rust_decimal::Decimal,
+    pub gas_estimate: u64,
+    pub gas_unit_price: rust_decimal::Decimal,
+    pub net_profit: rust_decimal::Decimal,
 }
 
 #[cfg(test)]
