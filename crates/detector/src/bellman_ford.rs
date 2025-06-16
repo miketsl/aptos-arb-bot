@@ -190,7 +190,9 @@ impl NaiveDetector {
                     }
 
                     let amount_in = Quantity(trade_size);
-                    if let Some(log_weight) = self.calculate_log_weight(edge, &amount_in) {
+                    if let Some(log_weight) =
+                        self.calculate_log_weight(edge, &amount_in, source_asset)
+                    {
                         let source_dist = distances[source_asset]; // Known to be finite here
                         let new_dist = source_dist + log_weight;
 
@@ -274,8 +276,13 @@ impl NaiveDetector {
 
     /// Calculates the log-space weight for an edge given an input amount.
     /// Weight = -ln(rate_e(amount_in) * (1 - fee))
-    fn calculate_log_weight(&self, edge: &Edge, amount_in: &Quantity) -> Option<f64> {
-        let amount_out = edge.quote(amount_in)?;
+    fn calculate_log_weight(
+        &self,
+        edge: &Edge,
+        amount_in: &Quantity,
+        asset_in: &Asset,
+    ) -> Option<f64> {
+        let amount_out = edge.quote(amount_in, asset_in)?;
 
         if amount_out.0.is_zero() || amount_in.0.is_zero() {
             return None;
@@ -398,9 +405,13 @@ impl NaiveDetector {
                     Quantity(self.trade_sizer.min_size().max(Decimal::new(1, 8)));
 
                 if let (Some(base_rate), Some(actual_rate)) = (
-                    self.trade_sizer.calculate_rate(edge, &min_qty_for_rate),
                     self.trade_sizer
-                        .calculate_rate(edge, &Quantity(initial_amount)),
+                        .calculate_rate(edge, &min_qty_for_rate, source_for_edge),
+                    self.trade_sizer.calculate_rate(
+                        edge,
+                        &Quantity(initial_amount),
+                        source_for_edge,
+                    ),
                 ) {
                     let slippage = self.trade_sizer.calculate_slippage(base_rate, actual_rate);
                     if slippage > self.trade_sizer.slippage_cap() {
@@ -411,7 +422,7 @@ impl NaiveDetector {
                 }
 
                 // Proceed with quoting using the current amount in the simulation
-                if let Some(output_amount) = edge.quote(&current_sim_amount) {
+                if let Some(output_amount) = edge.quote(&current_sim_amount, source_for_edge) {
                     if output_amount.0.is_zero() && i < cycle_path.len() - 1 {
                         // if not last trade and output is zero
                         return None; // Trade resulted in zero output prematurely
@@ -518,9 +529,9 @@ mod tests {
             last_updated: std::time::Instant::now(),
         };
 
-        graph.upsert_edge(edge1);
-        graph.upsert_edge(edge2);
-        graph.upsert_edge(edge3);
+        graph.upsert_pool(edge1);
+        graph.upsert_pool(edge2);
+        graph.upsert_pool(edge3);
 
         graph.snapshot()
     }
@@ -562,7 +573,8 @@ mod tests {
         };
 
         let amount_in = Quantity(dec!(100));
-        let weight = detector.calculate_log_weight(&edge, &amount_in);
+        let weight =
+            detector.calculate_log_weight(&edge, &amount_in, &Asset::from_str("USDC").unwrap());
 
         assert!(weight.is_some());
         let weight_val = weight.unwrap();

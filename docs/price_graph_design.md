@@ -36,7 +36,7 @@ pub struct Tick {
 
 ```rust
 pub trait PriceGraph {
-    fn upsert_edge(&mut self, edge: Edge);
+    fn upsert_pool(&mut self, edge: Edge);
     fn ingest_batch(&mut self, edges: Vec<Edge>);
     fn prune_stale(&mut self, ttl: Duration);
 
