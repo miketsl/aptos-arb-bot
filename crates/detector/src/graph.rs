@@ -62,7 +62,10 @@ impl PartialEq for Edge {
 
 impl Edge {
     /// Calculates the output amount for a given input amount based on the pool model.
-    pub fn quote(&self, amount_in: &Quantity) -> Option<Quantity> {
+    pub fn quote(&self, amount_in: &Quantity, asset_in: &Asset) -> Option<Quantity> {
+        if *asset_in != self.pair.asset_x {
+            return None;
+        }
         match &self.model {
             PoolModel::ConstantProduct {
                 reserve_x,
@@ -186,12 +189,17 @@ impl PriceGraphSnapshot {
 }
 
 /// Defines the interface for a price graph.
+///
+/// The price graph is responsible for managing pools and their corresponding
+/// trading edges. A key invariant is that for every liquidity pool added, two
+/// directed edges are created: a forward edge (asset_x -> asset_y) and a
+/// reverse edge (asset_y -> asset_x). The `upsert_pool` function handles this
+/// logic automatically.
 pub trait PriceGraph {
-    /// Inserts or updates an edge in the graph.
-    /// An edge represents a one-way path from `edge.pair.asset_x` to `edge.pair.asset_y`.
-    fn upsert_edge(&mut self, edge: Edge);
+    /// Inserts or updates a pool in the graph, creating both forward and reverse edges.
+    fn upsert_pool(&mut self, edge: Edge);
 
-    /// Ingests a batch of edges.
+    /// Ingests a batch of pools.
     fn ingest_batch(&mut self, edges: Vec<Edge>);
 
     /// Removes edges that haven't been updated within the given `ttl`.
@@ -247,7 +255,7 @@ impl Default for PriceGraphImpl {
 }
 
 impl PriceGraph for PriceGraphImpl {
-    fn upsert_edge(&mut self, edge: Edge) {
+    fn upsert_pool(&mut self, edge: Edge) {
         // ------------------------------------------------------------------
         // Forward edge
         // ------------------------------------------------------------------
@@ -304,7 +312,7 @@ impl PriceGraph for PriceGraphImpl {
 
     fn ingest_batch(&mut self, edges: Vec<Edge>) {
         for edge in edges {
-            self.upsert_edge(edge);
+            self.upsert_pool(edge);
         }
     }
 
@@ -391,7 +399,7 @@ mod tests {
         let mut graph = PriceGraphImpl::new();
         let edge1 = create_test_edge(usdc_asset(), apt_asset(), dec!(1000), dec!(100), 30);
 
-        graph.upsert_edge(edge1.clone());
+        graph.upsert_pool(edge1.clone());
 
         let snapshot = graph.snapshot();
         // Now expects 2 edges due to automatic reverse edge creation
@@ -457,12 +465,12 @@ mod tests {
         let mut stale_edge_orig = create_test_edge(apt_asset(), eth_asset(), dec!(50), dec!(1), 30);
 
         stale_edge_orig.last_updated = Instant::now() - Duration::from_secs(10);
-        // Also make its reverse counterpart (which will be created by upsert_edge) effectively stale
+        // Also make its reverse counterpart (which will be created by upsert_pool) effectively stale
         // by setting the original's last_updated before insertion.
         // The reverse edge will clone this stale `last_updated` time.
 
-        graph.upsert_edge(fresh_edge_orig.clone()); // Adds fresh_edge + its reverse (fresh)
-        graph.upsert_edge(stale_edge_orig.clone()); // Adds stale_edge + its reverse (stale)
+        graph.upsert_pool(fresh_edge_orig.clone()); // Adds fresh_edge + its reverse (fresh)
+        graph.upsert_pool(stale_edge_orig.clone()); // Adds stale_edge + its reverse (stale)
 
         // Initial state: 2 fresh (orig + rev), 2 stale (orig + rev) = 4 edges
         assert_eq!(graph.snapshot().edge_count(), 4);
@@ -504,8 +512,8 @@ mod tests {
         let edge_usdc_apt = create_test_edge(usdc.clone(), apt.clone(), dec!(1000), dec!(100), 30);
         let edge_apt_eth = create_test_edge(apt.clone(), eth.clone(), dec!(50), dec!(0.5), 30);
 
-        graph.upsert_edge(edge_usdc_apt.clone()); // Adds USDC->APT and APT->USDC
-        graph.upsert_edge(edge_apt_eth.clone()); // Adds APT->ETH and ETH->APT
+        graph.upsert_pool(edge_usdc_apt.clone()); // Adds USDC->APT and APT->USDC
+        graph.upsert_pool(edge_apt_eth.clone()); // Adds APT->ETH and ETH->APT
 
         // Neighbors of USDC: should be APT (from USDC->APT)
         let usdc_neighbors: Vec<_> = graph.neighbors(&usdc).collect();
@@ -561,7 +569,7 @@ mod tests {
 
         // Quote selling 100 USDC for APT
         let amount_in_usdc = Quantity(dec!(100));
-        let quote_result = edge.quote(&amount_in_usdc);
+        let quote_result = edge.quote(&amount_in_usdc, &usdc_asset());
 
         assert!(quote_result.is_some());
         let amount_out_apt = quote_result.unwrap();
@@ -579,10 +587,17 @@ mod tests {
 
         // Quote selling asset not in pair (APT for APT)
         let amount_in_apt_wrong = Quantity(dec!(10));
-        assert!(edge.quote(&amount_in_apt_wrong).is_some()); // The quote function doesn't check asset type anymore
-                                                             // Quote selling asset that is asset_y (APT for USDC, but edge is USDC -> APT)
+        assert!(
+            edge.quote(&amount_in_apt_wrong, &apt_asset()).is_none(),
+            "Quoting with wrong asset should fail"
+        );
+
+        // Quote selling asset that is asset_y (APT for USDC, but edge is USDC -> APT)
         let amount_in_apt_reverse = Quantity(dec!(10));
-        assert!(edge.quote(&amount_in_apt_reverse).is_some()); // The quote function doesn't check asset type anymore
+        assert!(
+            edge.quote(&amount_in_apt_reverse, &apt_asset()).is_none(),
+            "Quoting with reverse asset should fail"
+        );
     }
 
     #[test]
@@ -591,7 +606,7 @@ mod tests {
 
         // Try to swap more than available in reserve_x after fee
         let large_amount_in = Quantity(dec!(10000));
-        let quote_result = edge.quote(&large_amount_in);
+        let quote_result = edge.quote(&large_amount_in, &usdc_asset());
         // The formula itself might not show this as an error directly unless output is > reserve_y
         // Let's test if output is greater than reserve_y
         // amount_in_after_fee = 10000 * (1 - 0.0025) = 9975
@@ -603,11 +618,13 @@ mod tests {
         // Test with zero reserve
         let zero_reserve_edge = create_test_edge(usdc_asset(), apt_asset(), dec!(0), dec!(10), 25);
         let amount_in = Quantity(dec!(10));
-        assert!(zero_reserve_edge.quote(&amount_in).is_none());
+        assert!(zero_reserve_edge.quote(&amount_in, &usdc_asset()).is_none());
 
         let zero_reserve_edge_y =
             create_test_edge(usdc_asset(), apt_asset(), dec!(10), dec!(0), 25);
-        assert!(zero_reserve_edge_y.quote(&amount_in).is_none());
+        assert!(zero_reserve_edge_y
+            .quote(&amount_in, &usdc_asset())
+            .is_none());
     }
 
     #[test]
@@ -637,7 +654,7 @@ mod tests {
             last_updated: Instant::now(),
         };
 
-        graph.upsert_edge(cl_edge.clone());
+        graph.upsert_pool(cl_edge.clone());
         let snapshot = graph.snapshot();
         assert_eq!(snapshot.edge_count(), 2);
 

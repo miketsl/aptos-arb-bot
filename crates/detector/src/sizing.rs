@@ -131,7 +131,7 @@ impl TradeSizer {
         let mut best_amount = low;
 
         // Get the base rate (rate with minimal amount)
-        let base_rate = self.calculate_rate(edge, &Quantity(low))?;
+        let base_rate = self.calculate_rate(edge, &Quantity(low), &edge.pair.asset_x)?;
 
         // Binary search for largest amount within slippage cap
         for _ in 0..20 {
@@ -142,7 +142,7 @@ impl TradeSizer {
             }
 
             let mid = (low + high) / Decimal::new(2, 0);
-            let current_rate = self.calculate_rate(edge, &Quantity(mid))?;
+            let current_rate = self.calculate_rate(edge, &Quantity(mid), &edge.pair.asset_x)?;
 
             let slippage = self.calculate_slippage(base_rate, current_rate);
 
@@ -158,8 +158,13 @@ impl TradeSizer {
     }
 
     /// Calculates the exchange rate for a given amount on an edge.
-    pub fn calculate_rate(&self, edge: &Edge, amount_in: &Quantity) -> Option<f64> {
-        let amount_out = edge.quote(amount_in)?;
+    pub fn calculate_rate(
+        &self,
+        edge: &Edge,
+        amount_in: &Quantity,
+        asset_in: &Asset,
+    ) -> Option<f64> {
+        let amount_out = edge.quote(amount_in, asset_in)?;
 
         if amount_in.0.is_zero() {
             return None;
@@ -199,12 +204,17 @@ impl TradeSizer {
     }
 
     /// Calculates price impact for a trade.
-    pub fn calculate_price_impact(&self, edge: &Edge, amount_in: &Quantity) -> Option<f64> {
+    pub fn calculate_price_impact(
+        &self,
+        edge: &Edge,
+        amount_in: &Quantity,
+        asset_in: &Asset,
+    ) -> Option<f64> {
         // Get rate with minimal amount (approximates spot price)
-        let spot_rate = self.calculate_rate(edge, &Quantity(Decimal::new(1, 8)))?;
+        let spot_rate = self.calculate_rate(edge, &Quantity(Decimal::new(1, 8)), asset_in)?;
 
         // Get rate with actual amount
-        let actual_rate = self.calculate_rate(edge, amount_in)?;
+        let actual_rate = self.calculate_rate(edge, amount_in, asset_in)?;
 
         // Price impact = (spot_rate - actual_rate) / spot_rate
         if spot_rate == 0.0 {
@@ -243,7 +253,7 @@ mod tests {
             last_updated: std::time::Instant::now(),
         };
 
-        graph.upsert_edge(edge);
+        graph.upsert_pool(edge);
         graph.snapshot()
     }
 
@@ -297,7 +307,11 @@ mod tests {
             last_updated: std::time::Instant::now(),
         };
 
-        let rate = sizer.calculate_rate(&edge, &Quantity(dec!(100)));
+        let rate = sizer.calculate_rate(
+            &edge,
+            &Quantity(dec!(100)),
+            &Asset::from_str("USDC").unwrap(),
+        );
 
         assert!(rate.is_some());
         let rate_val = rate.unwrap();
@@ -340,7 +354,11 @@ mod tests {
             last_updated: std::time::Instant::now(),
         };
 
-        let impact = sizer.calculate_price_impact(&edge, &Quantity(dec!(1000)));
+        let impact = sizer.calculate_price_impact(
+            &edge,
+            &Quantity(dec!(1000)),
+            &Asset::from_str("USDC").unwrap(),
+        );
 
         assert!(impact.is_some());
         let impact_val = impact.unwrap();
