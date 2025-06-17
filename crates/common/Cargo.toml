@@ -10,6 +10,11 @@ rust_decimal_macros = "1.33"
 
 # Aptos SDK - direct git dependency, features enabled here.
 aptos-sdk = { git = "https://github.com/aptos-labs/aptos-core", branch = "devnet" }
+aptos-indexer-processor-sdk = { git = "https://github.com/aptos-labs/aptos-indexer-processor-sdk.git", tag = "aptos-indexer-processor-sdk-v2.1.1" }
+
+# Fix dependency conflicts
+num-bigint = "0.4"
+bigdecimal = "0.4"
 
 # Optional dependencies for Aptos testing utilities (excluding aptos-sdk as it's now direct)
 testcontainers = { version = "0.20", optional = true }

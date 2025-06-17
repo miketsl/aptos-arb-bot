@@ -10,8 +10,14 @@ log = "0.4"
 rust_decimal = "1.36"
 rust_decimal_macros = "1.36"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+thiserror = "1.0"
 
 # Internal dependencies
 common = { path = "../common" }
 detector = { path = "../detector" }
 dex-adapter-trait = { path = "../dex-adapter-trait" }
+
+[dev-dependencies]
+tempfile = "3.0"

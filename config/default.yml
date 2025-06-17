@@ -1,0 +1,23 @@
+dexes:
+  - name: hyperion          # CLMM
+    module_addr: "0xHYP"
+    grpc_indexer: "https://grpc.mainnet.aptoslabs.com:443" # Example, ensure this is the correct stream endpoint
+    grpc_auth_token: "YOUR_API_KEY_HERE" # Replace with your actual API key
+    starting_version: 0 # Or your desired starting version
+    fullnode_rpc: "https://fullnode.mainnet.aptoslabs.com"
+    pairs: ["APT/USDC","APT/USDT"]
+    relevant_event_types: # Add specific event types for Hyperion
+      - "0xHYP::dex_module::SwapEvent" # Example: Replace with actual event type
+      - "0xHYP::dex_module::PoolSnapshotEvent" # Example: Replace with actual event type
+  - name: thala
+    module_addr: "0xTHL"
+    grpc_indexer: "https://grpc.mainnet.aptoslabs.com:443" # Example, ensure this is the correct stream endpoint
+    grpc_auth_token: "YOUR_API_KEY_HERE" # Replace with your actual API key
+    starting_version: 0 # Or your desired starting version
+    fullnode_rpc: "https://fullnode.mainnet.aptoslabs.com"
+    pairs: ["APT/USDC","APT/USDT"]
+    relevant_event_types: # Add specific event types for Thala, if it uses a similar streaming mechanism
+      - "0xTHL::amm_module::SwapEvent" # Example: Replace with actual event type
+detector:
+  interval_ms: 500
+  min_profit_pct: 0.01
