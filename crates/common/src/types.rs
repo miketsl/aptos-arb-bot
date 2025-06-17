@@ -67,33 +67,6 @@ impl fmt::Display for AssetPair {
     }
 }
 
-/// Represents a unique identifier for an exchange.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ExchangeId(pub String);
-
-impl fmt::Display for ExchangeId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<&str> for ExchangeId {
-    fn from(s: &str) -> Self {
-        ExchangeId(s.to_string())
-    }
-}
-
-impl ExchangeId {
-    pub const PANCAKESWAP_V3: ExchangeId = ExchangeId(String::new()); // This won't work with const
-}
-
-// Let's use a different approach for constants
-impl ExchangeId {
-    pub fn pancakeswap_v3() -> Self {
-        ExchangeId("PancakeswapV3".to_string())
-    }
-}
-
 /// Represents a trading pair between two assets.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TradingPair {
@@ -131,13 +104,13 @@ impl fmt::Display for OrderType {
 
 /// Represents a trade order.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Order {
+pub struct Order<E> {
     pub id: String, // Unique order identifier
     pub pair: AssetPair,
     pub order_type: OrderType,
     pub price: Price,
     pub quantity: Quantity,
-    pub exchange: ExchangeId,
+    pub exchange: E,
     // Timestamp, etc. can be added later
 }
 
@@ -170,8 +143,8 @@ pub struct TradeResult {
 
 /// Represents a path quote result from the arbitrage detector.
 #[derive(Debug, Clone, PartialEq)]
-pub struct PathQuote {
-    pub path: Vec<(Asset, ExchangeId)>,
+pub struct PathQuote<E> {
+    pub path: Vec<(Asset, E)>,
     pub amount_in: Quantity,
     pub amount_out: Quantity,
     /// Profit percentage, expressed as a fraction (e.g., 0.01 for 1%).
@@ -222,13 +195,6 @@ mod tests {
     }
 
     #[test]
-    fn test_exchange_id_display_and_from_str() {
-        let exchange_id = ExchangeId::from("binance");
-        assert_eq!(exchange_id, ExchangeId("binance".to_string()));
-        assert_eq!(format!("{}", exchange_id), "binance");
-    }
-
-    #[test]
     fn test_asset_pair_ordering() {
         let pair1 = AssetPair::new(Asset::from("btc"), Asset::from("usdt"));
         let pair2 = AssetPair::new(Asset::from("eth"), Asset::from("usdt"));
@@ -271,10 +237,11 @@ mod tests {
             order_type: OrderType::Buy,
             price: Price(dec!(50000.0)),
             quantity: Quantity(dec!(0.5)),
-            exchange: ExchangeId::from("test-exchange"),
+            exchange: "test-exchange",
         };
         assert_eq!(order.id, "order123");
         assert_eq!(order.order_type, OrderType::Buy);
+        assert_eq!(order.exchange, "test-exchange");
     }
 
     #[test]
@@ -289,4 +256,15 @@ mod tests {
         assert_eq!(result.status, TradeStatus::Filled);
         assert_eq!(result.filled_quantity, Quantity(dec!(0.5)));
     }
+}
+
+/// Represents a market data tick (price update).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tick {
+    /// The trading pair for this price update.
+    pub pair: TradingPair,
+    /// The current price.
+    pub price: rust_decimal::Decimal,
+    /// The timestamp of this update.
+    pub timestamp: std::time::SystemTime,
 }

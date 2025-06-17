@@ -5,9 +5,13 @@ edition = "2021"
 
 [dependencies]
 common = { path = "../common" }
+detector = { path = "../detector" }
+dex-adapter-trait = { path = "../dex-adapter-trait" }
 aptos-sdk = { git = "https://github.com/aptos-labs/aptos-core", branch = "devnet" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
+async-trait = "0.1"
+log = "0.4"
 rand = "0.8"
 rust_decimal = "1.33"
 rust_decimal_macros = "1.33"

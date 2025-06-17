@@ -26,30 +26,9 @@ pub enum CommonError {
     /// Represents an item not being found.
     #[error("Item not found: {0}")]
     NotFound(String),
-}
-
-/// Specific error types for DEX adapter operations.
-#[derive(Error, Debug, PartialEq)]
-pub enum DexAdapterError {
-    /// Represents an error during price quotation.
-    #[error("Quote error: {0}")]
-    QuoteError(String),
-
-    /// Represents an error during liquidity calculations.
-    #[error("Liquidity error: {0}")]
-    LiquidityError(String),
-
-    /// Represents an error during pool operations.
-    #[error("Pool error: {0}")]
-    PoolError(String),
-
-    /// Represents an invalid trading pair.
-    #[error("Invalid trading pair: {0}")]
-    InvalidTradingPair(String),
-
-    /// Represents insufficient liquidity for the operation.
-    #[error("Insufficient liquidity: {0}")]
-    InsufficientLiquidity(String),
+    /// Represents an error from a DEX adapter.
+    #[error("DEX adapter error: {0}")]
+    DexAdapterError(String),
 }
 
 #[cfg(test)]

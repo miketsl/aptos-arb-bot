@@ -1,8 +1,10 @@
 //! Transaction building, gas estimation, and relaying.
 
 use aptos_sdk::types::LocalAccount;
-use common::types::{Order, Quantity, TradeResult, TradeStatus}; // Removed Price
-use rust_decimal_macros::dec; // For mock simulation
+use async_trait::async_trait;
+use common::types::{Order, Quantity, TradeResult, TradeStatus};
+use rust_decimal_macros::dec;
+use std::fmt::Display; // For mock simulation
 
 // Placeholder for a more sophisticated client or on-chain interaction mechanism
 pub struct BlockchainClient {
@@ -18,7 +20,10 @@ impl BlockchainClient {
 
     // Simulates submitting a transaction to the blockchain
     // In a real scenario, this would interact with the Aptos SDK to send a transaction
-    pub async fn submit_transaction(&self, _order: &Order) -> Result<(), anyhow::Error> {
+    pub async fn submit_transaction<E: Display>(
+        &self,
+        _order: &Order<E>,
+    ) -> Result<(), anyhow::Error> {
         // Simulate network delay and transaction processing
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         // Simulate a successful transaction submission for now
@@ -42,18 +47,22 @@ impl BlockchainClient {
     }
 }
 
-pub struct TradeExecutor {
+pub struct TradeExecutor<E> {
     client: BlockchainClient,
+    _phantom: std::marker::PhantomData<E>,
 }
 
-impl TradeExecutor {
+impl<E: Display + Clone> TradeExecutor<E> {
     pub fn new(client: BlockchainClient) -> Self {
-        TradeExecutor { client }
+        TradeExecutor {
+            client,
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     /// Executes a trade order.
     /// For now, this will be a simplified on-chain simulation.
-    pub async fn execute_trade(&self, order: &Order) -> TradeResult {
+    pub async fn execute_trade(&self, order: &Order<E>) -> TradeResult {
         println!(
             "Executing trade for order: {} on {}",
             order.id, order.exchange
@@ -114,7 +123,7 @@ impl TradeExecutor {
     /// Simulates an on-chain trade execution.
     /// This function is a placeholder and should be expanded with actual
     /// on-chain interaction logic or a more sophisticated simulation model.
-    pub async fn simulate_onchain_trade(&self, order: &Order) -> TradeResult {
+    pub async fn simulate_onchain_trade(&self, order: &Order<E>) -> TradeResult {
         println!(
             "Simulating on-chain trade for order: {} - {} {} {} @ {} on {}",
             order.id,
@@ -172,6 +181,56 @@ impl TradeExecutor {
     }
 }
 
+// Implementation of IsExecutor trait for integration with the detector
+#[async_trait]
+impl detector::traits::IsExecutor for TradeExecutor<dex_adapter_trait::Exchange> {
+    async fn execute_trade(
+        &self,
+        opportunity: &detector::traits::ArbitrageOpportunity,
+    ) -> anyhow::Result<()> {
+        log::info!(
+            "Executing arbitrage opportunity with net profit: {}",
+            opportunity.cycle_eval.net_profit
+        );
+
+        // Convert the arbitrage opportunity to a series of orders
+        // For now, we'll create a simplified order based on the first trade in the path
+        if let Some((asset, exchange)) = opportunity.path_quote.path.first() {
+            let order = Order {
+                id: format!("arb_{}", rand::random::<u32>()),
+                pair: common::types::AssetPair::new(
+                    asset.clone(),
+                    // Use the next asset in the path, or fallback to the current asset
+                    opportunity
+                        .path_quote
+                        .path
+                        .get(1)
+                        .map(|(a, _)| a.clone())
+                        .unwrap_or_else(|| asset.clone()),
+                ),
+                order_type: common::types::OrderType::Buy,
+                price: common::types::Price(opportunity.cycle_eval.net_profit),
+                quantity: opportunity.path_quote.amount_in,
+                exchange: *exchange,
+            };
+
+            let result = self.execute_trade(&order).await;
+
+            match result.status {
+                TradeStatus::Filled => {
+                    log::info!("Arbitrage trade executed successfully: {}", result.order_id);
+                    Ok(())
+                }
+                _ => {
+                    anyhow::bail!("Trade execution failed: {:?}", result)
+                }
+            }
+        } else {
+            anyhow::bail!("Empty arbitrage path")
+        }
+    }
+}
+
 // The init function is likely for setting up global state or resources if needed.
 // For now, it can remain empty or be used to initialize a default TradeExecutor if desired.
 pub fn init() {
@@ -182,7 +241,8 @@ pub fn init() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::types::{Asset, AssetPair, ExchangeId, OrderType, Price, Quantity};
+    use common::types::{Asset, AssetPair, OrderType, Price, Quantity};
+    use dex_adapter_trait::Exchange;
     use rust_decimal_macros::dec;
 
     // Helper to create a default BlockchainClient for tests
@@ -193,7 +253,7 @@ mod tests {
     #[tokio::test]
     async fn test_trade_executor_new() {
         let client = mock_blockchain_client();
-        let _executor = TradeExecutor::new(client);
+        let _executor: TradeExecutor<Exchange> = TradeExecutor::new(client);
         // Basic test to ensure instantiation doesn't panic.
     }
 
@@ -207,7 +267,7 @@ mod tests {
             order_type: OrderType::Buy,
             price: Price(dec!(50000.0)),
             quantity: Quantity(dec!(1.0)),
-            exchange: ExchangeId::from("sim_exchange"),
+            exchange: Exchange::Tapp,
         };
 
         let result = executor.execute_trade(&order).await;
@@ -236,7 +296,7 @@ mod tests {
             order_type: OrderType::Sell,
             price: Price(dec!(3000.0)),
             quantity: Quantity(dec!(5.0)),
-            exchange: ExchangeId::from("sim_dex"),
+            exchange: Exchange::Tapp,
         };
 
         let mut outcomes = std::collections::HashMap::new();

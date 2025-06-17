@@ -12,13 +12,13 @@ pub enum PoolModel {
 }
 pub struct Edge {
     pub pair: TradingPair,
-    pub exchange: ExchangeId,
+    pub exchange: Exchange,
     pub model: PoolModel,
     pub last_updated: Instant,
 }
 ``` | Directed; one edge per swap direction |
-| **Graph container** | `petgraph::graphmap::DiGraphMap<Asset, Edge>` | O(1) neighbour lookup |
-| **Quote result** | `PathQuote { path: Vec<(Asset, ExchangeId)>, amount_in: Quantity, amount_out: Quantity, profit_pct: f64 }` | Returned by detector |
+| **Graph container** | `petgraph::graphmap::DiGraphMap<AssetId, Edge>` using `PriceGraphImpl` | O(1) neighbour lookup |
+| **Quote result** | `PathQuote { path: Vec<(Asset, Exchange)>, amount_in: Quantity, amount_out: Quantity, profit_pct: f64 }` | Returned by detector |
 | **Cycle eval w/ gas** | `CycleEval { gross_profit: Decimal, gas_estimate: u64, gas_unit_price: Decimal, net_profit: Decimal }` | Final filter |
 
 ### Tick structure (CLMM)
@@ -40,8 +40,16 @@ pub trait PriceGraph {
     fn ingest_batch(&mut self, edges: Vec<Edge>);
     fn prune_stale(&mut self, ttl: Duration);
 
-    fn neighbors(&self, asset: &Asset) -> impl Iterator<Item = (&Asset, &Edge)>;
+    fn neighbors<'a>(&'a self, asset: &Asset) -> Box<dyn Iterator<Item = (&'a Asset, &'a Edge)> + 'a>;
     fn snapshot(&self) -> PriceGraphSnapshot;      // immutable copy
+}
+
+// Implementation
+pub struct PriceGraphImpl {
+    graph: DiGraphMap<AssetId, Edge>,
+    asset_mapping: HashMap<AssetId, Asset>,
+    reverse_mapping: HashMap<Asset, AssetId>,
+    next_id: u64,
 }
 ```
 
@@ -74,11 +82,20 @@ pub trait PriceGraph {
 
 ## 4  Sizing Heuristic v0
 
-```
+```rust
+// SizingConfig
+pub struct SizingConfig {
+    pub size_fraction: f64,      // e.g. 0.05 = 5%
+    pub slippage_cap: f64,       // e.g. 0.05 = 5%
+    pub min_size: Decimal,       // e.g. 0.000001
+    pub max_size: Decimal,       // e.g. 10,000
+}
+
+// TradeSizer implementation
 max_size(asset) = min_liquidity_edge(asset) × cfg.size_fraction   //  e.g. 5 %
 ```
 
-Detector can binary-search amount to stay below `cfg.slippage_cap` (% price impact).
+Detector can binary-search amount to stay below `cfg.slippage_cap` (% price impact) using `TradeSizer::find_optimal_amount_for_slippage()`.
 
 ---
 

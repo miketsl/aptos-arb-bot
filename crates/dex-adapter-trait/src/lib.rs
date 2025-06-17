@@ -1,22 +1,75 @@
 use async_trait::async_trait;
-use common::types::Asset;
+use common::types::{Asset, TradingPair};
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
+use std::str::FromStr;
 
-/// Represents a pair of assets for trading.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TradingPair(pub Asset, pub Asset);
+/// Represents a specific decentralized exchange.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Exchange {
+    Hyperion,
+    ThalaSwap,
+    Tapp,
+    PancakeSwap,
+    SushiSwap,
+    LiquidSwap,
+}
 
-impl TradingPair {
-    /// Creates a new trading pair.
-    pub fn new(asset1: Asset, asset2: Asset) -> Self {
-        TradingPair(asset1, asset2)
+impl Exchange {
+    /// All supported exchanges as a constant array.
+    pub const ALL_EXCHANGES: &'static [Exchange] = &[
+        Exchange::Hyperion,
+        Exchange::ThalaSwap,
+        Exchange::Tapp,
+        Exchange::PancakeSwap,
+        Exchange::SushiSwap,
+        Exchange::LiquidSwap,
+    ];
+
+    /// Returns the canonical string representation of the exchange.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Exchange::Hyperion => "Hyperion",
+            Exchange::ThalaSwap => "ThalaSwap",
+            Exchange::Tapp => "Tapp",
+            Exchange::PancakeSwap => "PancakeSwap",
+            Exchange::SushiSwap => "SushiSwap",
+            Exchange::LiquidSwap => "LiquidSwap",
+        }
     }
 }
 
-impl fmt::Display for TradingPair {
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExchangeError(pub String);
+
+impl fmt::Display for ExchangeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}", self.0, self.1)
+        write!(f, "Invalid exchange: {}", self.0)
+    }
+}
+
+impl Error for ExchangeError {}
+
+impl FromStr for Exchange {
+    type Err = ExchangeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Hyperion" => Ok(Exchange::Hyperion),
+            "ThalaSwap" => Ok(Exchange::ThalaSwap),
+            "Tapp" => Ok(Exchange::Tapp),
+            "PancakeSwap" => Ok(Exchange::PancakeSwap),
+            "SushiSwap" => Ok(Exchange::SushiSwap),
+            "LiquidSwap" => Ok(Exchange::LiquidSwap),
+            _ => Err(ExchangeError(s.to_string())),
+        }
+    }
+}
+
+impl fmt::Display for Exchange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -83,6 +136,9 @@ impl Error for DexAdapterError {}
 /// obtain quotes for swaps, and execute swaps.
 #[async_trait]
 pub trait DexAdapter: Send + Sync {
+    /// Returns the specific `Exchange` this adapter is for.
+    fn exchange(&self) -> Exchange;
+
     /// Retrieves a list of all trading pairs supported by the DEX.
     ///
     /// # Returns
@@ -161,6 +217,10 @@ impl MockDexAdapter {
 
 #[async_trait]
 impl DexAdapter for MockDexAdapter {
+    fn exchange(&self) -> Exchange {
+        // Let's say the mock adapter represents Tapp for testing purposes
+        Exchange::Tapp
+    }
     /// Returns the predefined list of supported trading pairs.
     async fn get_supported_pairs(&self) -> Result<Vec<TradingPair>, DexAdapterError> {
         Ok(self.supported_pairs.clone())
@@ -177,14 +237,15 @@ impl DexAdapter for MockDexAdapter {
         asset_in: &Asset,
     ) -> Result<Quote, DexAdapterError> {
         if !self.supported_pairs.contains(pair)
-            && !self
-                .supported_pairs
-                .contains(&TradingPair(pair.1.clone(), pair.0.clone()))
+            && !self.supported_pairs.contains(&TradingPair::new(
+                pair.asset_y.clone(),
+                pair.asset_x.clone(),
+            ))
         {
             return Err(DexAdapterError::PairNotFound(pair.clone()));
         }
 
-        let (asset1, asset2) = (&pair.0, &pair.1);
+        let (asset1, asset2) = (&pair.asset_x, &pair.asset_y);
         let (expected_asset_out, ratio) = if asset_in == asset1 {
             (asset2.clone(), 10.0) // e.g., 1 asset1 = 10 asset2
         } else if asset_in == asset2 {
@@ -342,5 +403,25 @@ mod tests {
         let pair = TradingPair::new(Asset::from("FAKE"), Asset::from("COIN"));
         let result = adapter.swap(&pair, 100, &Asset::from("FAKE"), 90).await;
         assert!(matches!(result, Err(DexAdapterError::PairNotFound(_))));
+    }
+
+    #[test]
+    fn test_exchange_roundtrip() {
+        // Test all exchanges can be converted to string and back
+        for &exchange in Exchange::ALL_EXCHANGES {
+            let s = exchange.to_string();
+            let parsed = s.parse::<Exchange>().unwrap();
+            assert_eq!(exchange, parsed);
+        }
+
+        // Test as_str method
+        assert_eq!(Exchange::Hyperion.as_str(), "Hyperion");
+        assert_eq!(Exchange::ThalaSwap.as_str(), "ThalaSwap");
+        assert_eq!(Exchange::Tapp.as_str(), "Tapp");
+
+        // Test invalid exchange parsing
+        let result = "InvalidExchange".parse::<Exchange>();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, "InvalidExchange");
     }
 }

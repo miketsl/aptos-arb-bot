@@ -15,7 +15,7 @@ pub mod aptos_test_utils;
 
 // Re-export key items for easier access.
 pub use errors::CommonError;
-pub use types::{Asset, AssetPair, ExchangeId, Price, Quantity};
+pub use types::{Asset, AssetPair, Price, Quantity};
 
 #[cfg(test)]
 mod tests {
@@ -28,7 +28,6 @@ mod tests {
         let _asset = Asset("TEST".to_string());
         let _price = Price(rust_decimal_macros::dec!(1.0));
         let _quantity = Quantity(rust_decimal_macros::dec!(100.0));
-        let _exchange_id = ExchangeId("EXCHANGE_TEST".to_string());
         let _asset_pair = AssetPair {
             base: Asset("BASE".to_string()),
             quote: Asset("QUOTE".to_string()),
