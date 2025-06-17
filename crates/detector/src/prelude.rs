@@ -3,6 +3,7 @@
 // Re-export commonly used types and traits from this crate.
 pub use crate::graph::{Edge, PoolModel, PriceGraph, PriceGraphSnapshot, Tick};
 pub use crate::service::{DexAdapters, PriceStream};
+pub use crate::traits::{ArbitrageOpportunity, IsExecutor, IsRiskManager};
 pub use crate::{Detector, DetectorConfig};
 
 // Re-export relevant items from common crate

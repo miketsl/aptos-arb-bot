@@ -275,16 +275,16 @@ impl GasCalculator {
     /// Filters cycles by net profitability after gas costs.
     pub async fn filter_profitable_cycles(
         &self,
-        cycles: Vec<PathQuote>,
+        cycles: Vec<PathQuote<Exchange>>,
         oracle_prices: &HashMap<Asset, Decimal>,
         min_net_profit: Decimal,
-    ) -> Vec<CycleEval> {
+    ) -> Vec<(PathQuote<Exchange>, CycleEval)> {
         let mut profitable_cycles = Vec::new();
 
         for cycle in cycles {
             if let Ok(eval) = self.evaluate_cycle_with_gas(&cycle, oracle_prices).await {
                 if eval.net_profit >= min_net_profit {
-                    profitable_cycles.push(eval);
+                    profitable_cycles.push((cycle, eval));
                 }
             }
         }

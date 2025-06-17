@@ -79,7 +79,7 @@ impl NaiveDetector {
         &self,
         snapshot: &PriceGraphSnapshot,
         oracle_prices: &HashMap<Asset, Decimal>, // Prices for converting gas cost
-    ) -> Result<Vec<CycleEval>, CommonError> {
+    ) -> Result<Vec<ArbitrageOpportunity>, CommonError> {
         let mut all_path_quotes = Vec::new();
 
         // Step 1: Generate trade sizes using TradeSizer
@@ -125,18 +125,27 @@ impl NaiveDetector {
         });
 
         // Step 4: Filter by net profit using GasCalculator and rank
-        let mut profitable_cycles = self
+        let profitable_cycles = self
             .gas_calculator
             .filter_profitable_cycles(all_path_quotes, oracle_prices, self.config.min_net_profit)
             .await; // Removed ? as filter_profitable_cycles returns Vec<CycleEval> not Result
 
-        profitable_cycles.sort_by(|a, b| {
-            b.net_profit
-                .partial_cmp(&a.net_profit)
+        let mut opportunities = profitable_cycles
+            .into_iter()
+            .map(|(path_quote, cycle_eval)| ArbitrageOpportunity {
+                path_quote,
+                cycle_eval,
+            })
+            .collect::<Vec<_>>();
+
+        opportunities.sort_by(|a, b| {
+            b.cycle_eval
+                .net_profit
+                .partial_cmp(&a.cycle_eval.net_profit)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        Ok(profitable_cycles)
+        Ok(opportunities)
     }
 
     /// Detects arbitrage opportunities for a specific trade size (gross profit).

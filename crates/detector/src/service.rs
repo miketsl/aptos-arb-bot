@@ -1,6 +1,7 @@
 use crate::bellman_ford::{DetectorConfig, NaiveDetector};
 use crate::graph::{PriceGraph, PriceGraphImpl};
 use crate::prelude::*;
+use crate::traits::{ArbitrageOpportunity, IsExecutor, IsRiskManager};
 use anyhow::Result;
 use common::errors::CommonError;
 use dex_adapter_trait::{DexAdapter, Exchange};
@@ -28,6 +29,10 @@ pub(crate) struct DetectorService {
     price_stream: PriceStream,
     /// Adapters for interacting with DEXs.
     _dex_adapters: DexAdapters,
+    /// The risk manager.
+    risk_manager: Arc<dyn IsRiskManager>,
+    /// The executor.
+    executor: Arc<dyn IsExecutor>,
     /// Receiver for shutdown signals.
     shutdown_rx: Receiver<()>,
 }
@@ -38,6 +43,8 @@ impl DetectorService {
         config: DetectorConfig,
         price_stream: PriceStream,
         dex_adapters: DexAdapters,
+        risk_manager: Arc<dyn IsRiskManager>,
+        executor: Arc<dyn IsExecutor>,
         shutdown_rx: Receiver<()>,
     ) -> Self {
         Self {
@@ -45,6 +52,8 @@ impl DetectorService {
             detector: NaiveDetector::new(config),
             price_stream,
             _dex_adapters: dex_adapters,
+            risk_manager,
+            executor,
             shutdown_rx,
         }
     }
@@ -71,8 +80,10 @@ impl DetectorService {
                             // Run detection
                             match self.detector.detect_arbitrage(&graph.snapshot(), &oracle_prices).await {
                                 Ok(opportunities) => {
-                                    if !opportunities.is_empty() {
-                                        log::info!("Found {} arbitrage opportunities.", opportunities.len());
+                                    for opportunity in opportunities {
+                                        if self.risk_manager.assess_risk(&opportunity).await? {
+                                            self.executor.execute_trade(&opportunity).await?;
+                                        }
                                     }
                                 }
                                 Err(e) => {
