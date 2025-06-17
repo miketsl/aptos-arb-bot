@@ -1,6 +1,8 @@
 //! Price graph, path search, and risk filters.
 
+pub mod api;
 pub mod bellman_ford;
+pub mod exchange_const;
 pub mod gas;
 pub mod graph;
 pub mod prelude;
@@ -14,6 +16,12 @@ use crate::traits::{IsExecutor, IsRiskManager};
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+
+// Re-export important types and traits
+pub use crate::api::{DetectorApi, DetectorStatus};
+pub use crate::bellman_ford::NaiveDetector;
+pub use crate::graph::{Edge, PoolModel, PriceGraph, PriceGraphImpl, PriceGraphSnapshot, Tick};
+pub use crate::traits::ArbitrageOpportunity;
 
 /// The public interface for the arbitrage detector.
 pub struct Detector {
@@ -51,8 +59,18 @@ impl Detector {
         }
     }
 
+    /// Spawns the detector in a background task and returns a join handle.
+    pub fn spawn(self) -> tokio::task::JoinHandle<Result<()>> {
+        tokio::spawn(async move { self.run().await })
+    }
+
     /// Starts the detector's main loop.
     pub async fn run(self) -> Result<()> {
         self.service.run().await
     }
+}
+
+/// Initialize the detector module.
+pub fn init() {
+    // Placeholder for any initialization required by the detector module
 }

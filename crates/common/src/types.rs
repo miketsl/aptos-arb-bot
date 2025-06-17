@@ -257,3 +257,14 @@ mod tests {
         assert_eq!(result.filled_quantity, Quantity(dec!(0.5)));
     }
 }
+
+/// Represents a market data tick (price update).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tick {
+    /// The trading pair for this price update.
+    pub pair: TradingPair,
+    /// The current price.
+    pub price: rust_decimal::Decimal,
+    /// The timestamp of this update.
+    pub timestamp: std::time::SystemTime,
+}

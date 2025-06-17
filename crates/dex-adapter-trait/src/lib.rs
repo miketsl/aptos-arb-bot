@@ -11,24 +11,65 @@ pub enum Exchange {
     Hyperion,
     ThalaSwap,
     Tapp,
+    PancakeSwap,
+    SushiSwap,
+    LiquidSwap,
 }
 
+impl Exchange {
+    /// All supported exchanges as a constant array.
+    pub const ALL_EXCHANGES: &'static [Exchange] = &[
+        Exchange::Hyperion,
+        Exchange::ThalaSwap,
+        Exchange::Tapp,
+        Exchange::PancakeSwap,
+        Exchange::SushiSwap,
+        Exchange::LiquidSwap,
+    ];
+
+    /// Returns the canonical string representation of the exchange.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Exchange::Hyperion => "Hyperion",
+            Exchange::ThalaSwap => "ThalaSwap",
+            Exchange::Tapp => "Tapp",
+            Exchange::PancakeSwap => "PancakeSwap",
+            Exchange::SushiSwap => "SushiSwap",
+            Exchange::LiquidSwap => "LiquidSwap",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExchangeError(pub String);
+
+impl fmt::Display for ExchangeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid exchange: {}", self.0)
+    }
+}
+
+impl Error for ExchangeError {}
+
 impl FromStr for Exchange {
-    type Err = ();
+    type Err = ExchangeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "Hyperion" => Ok(Exchange::Hyperion),
             "ThalaSwap" => Ok(Exchange::ThalaSwap),
             "Tapp" => Ok(Exchange::Tapp),
-            _ => Err(()),
+            "PancakeSwap" => Ok(Exchange::PancakeSwap),
+            "SushiSwap" => Ok(Exchange::SushiSwap),
+            "LiquidSwap" => Ok(Exchange::LiquidSwap),
+            _ => Err(ExchangeError(s.to_string())),
         }
     }
 }
 
 impl fmt::Display for Exchange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -362,5 +403,25 @@ mod tests {
         let pair = TradingPair::new(Asset::from("FAKE"), Asset::from("COIN"));
         let result = adapter.swap(&pair, 100, &Asset::from("FAKE"), 90).await;
         assert!(matches!(result, Err(DexAdapterError::PairNotFound(_))));
+    }
+
+    #[test]
+    fn test_exchange_roundtrip() {
+        // Test all exchanges can be converted to string and back
+        for &exchange in Exchange::ALL_EXCHANGES {
+            let s = exchange.to_string();
+            let parsed = s.parse::<Exchange>().unwrap();
+            assert_eq!(exchange, parsed);
+        }
+
+        // Test as_str method
+        assert_eq!(Exchange::Hyperion.as_str(), "Hyperion");
+        assert_eq!(Exchange::ThalaSwap.as_str(), "ThalaSwap");
+        assert_eq!(Exchange::Tapp.as_str(), "Tapp");
+
+        // Test invalid exchange parsing
+        let result = "InvalidExchange".parse::<Exchange>();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, "InvalidExchange");
     }
 }

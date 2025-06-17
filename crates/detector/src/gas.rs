@@ -2,6 +2,7 @@
 
 use crate::prelude::*;
 use common::errors::CommonError;
+use dex_adapter_trait::Exchange;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 
@@ -61,7 +62,7 @@ impl GasCalculator {
     }
 
     /// Estimates gas cost for a given arbitrage path.
-    pub fn estimate_gas_cost(&self, path: &[(Asset, ExchangeId)]) -> u64 {
+    pub fn estimate_gas_cost(&self, path: &[(Asset, Exchange)]) -> u64 {
         let swap_count = path.len() as u64;
         let base_estimate = self.config.base_gas_cost + (swap_count * self.config.gas_per_swap);
 
@@ -75,7 +76,7 @@ impl GasCalculator {
     /// Simulates a transaction to get precise gas usage using Aptos simulate() RPC.
     pub async fn simulate_transaction(
         &self,
-        path: &[(Asset, ExchangeId)],
+        path: &[(Asset, Exchange)],
         amount: &Quantity,
     ) -> Result<u64, CommonError> {
         let transaction_payload = self.build_transaction_payload(path, amount)?;
@@ -135,7 +136,7 @@ impl GasCalculator {
     /// Builds the transaction payload for the arbitrage sequence.
     fn build_transaction_payload(
         &self,
-        path: &[(Asset, ExchangeId)],
+        path: &[(Asset, Exchange)],
         amount: &Quantity,
     ) -> Result<serde_json::Value, CommonError> {
         let mut function_calls = Vec::new();
@@ -145,8 +146,8 @@ impl GasCalculator {
             let next_asset = &path[(i + 1) % path.len()].0;
 
             // Build swap function call based on exchange
-            let swap_function = match exchange.0.as_str() {
-                "PancakeswapV3" => {
+            let swap_function = match exchange.as_str() {
+                "PancakeSwap" => {
                     serde_json::json!({
                         "function": "0x1::pancakeswap::swap_exact_input",
                         "type_arguments": [
@@ -162,7 +163,7 @@ impl GasCalculator {
                 _ => {
                     return Err(CommonError::InvalidConfiguration(format!(
                         "Unsupported exchange: {}",
-                        exchange.0
+                        exchange
                     )));
                 }
             };
@@ -244,7 +245,7 @@ impl GasCalculator {
     /// Evaluates a cycle with gas costs included to calculate net profit.
     pub async fn evaluate_cycle_with_gas(
         &self,
-        cycle: &PathQuote,
+        cycle: &PathQuote<Exchange>,
         oracle_prices: &HashMap<Asset, Decimal>,
     ) -> Result<CycleEval, CommonError> {
         // Use actual simulation for precise gas estimation
@@ -317,20 +318,11 @@ mod tests {
         GasCalculator::with_defaults()
     }
 
-    fn create_test_path() -> Vec<(Asset, ExchangeId)> {
+    fn create_test_path() -> Vec<(Asset, Exchange)> {
         vec![
-            (
-                Asset::from_str("USDC").unwrap(),
-                ExchangeId::pancakeswap_v3(),
-            ),
-            (
-                Asset::from_str("APT").unwrap(),
-                ExchangeId::pancakeswap_v3(),
-            ),
-            (
-                Asset::from_str("ETH").unwrap(),
-                ExchangeId::pancakeswap_v3(),
-            ),
+            (Asset::from_str("USDC").unwrap(), Exchange::PancakeSwap),
+            (Asset::from_str("APT").unwrap(), Exchange::PancakeSwap),
+            (Asset::from_str("ETH").unwrap(), Exchange::PancakeSwap),
         ]
     }
 

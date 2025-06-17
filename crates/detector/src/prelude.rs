@@ -4,11 +4,11 @@
 pub use crate::graph::{Edge, PoolModel, PriceGraph, PriceGraphSnapshot, Tick};
 pub use crate::service::{DexAdapters, PriceStream};
 pub use crate::traits::{ArbitrageOpportunity, IsExecutor, IsRiskManager};
-pub use crate::{Detector, DetectorConfig};
+pub use crate::Detector;
 
 // Re-export relevant items from common crate
 pub use common::errors::CommonError;
-pub use common::types::{Asset, CycleEval, PathQuote, Quantity, TradingPair}; // Or a more specific error type for detector
+pub use common::types::{Asset, CycleEval, PathQuote, Quantity, Tick as MarketTick, TradingPair}; // Or a more specific error type for detector
 
 // Re-export external crates if they are widely used within the detector crate modules
 pub use aptos_sdk::types::account_address::AccountAddress;

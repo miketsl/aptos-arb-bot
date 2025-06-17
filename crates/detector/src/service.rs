@@ -1,19 +1,19 @@
 use crate::bellman_ford::{DetectorConfig, NaiveDetector};
 use crate::graph::{PriceGraph, PriceGraphImpl};
 use crate::prelude::*;
-use crate::traits::{ArbitrageOpportunity, IsExecutor, IsRiskManager};
+use crate::traits::{IsExecutor, IsRiskManager};
 use anyhow::Result;
-use common::errors::CommonError;
+
 use dex_adapter_trait::{DexAdapter, Exchange};
 use futures::stream::{Stream, StreamExt};
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::mpsc::{self, Receiver};
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
 
 /// A stream of price ticks.
-pub type PriceStream = Pin<Box<dyn Stream<Item = Result<Tick>> + Send>>;
+pub type PriceStream = Pin<Box<dyn Stream<Item = Result<MarketTick>> + Send + Sync>>;
 
 /// A collection of DEX adapters, keyed by their exchange identifier.
 pub type DexAdapters = HashMap<Exchange, Arc<dyn DexAdapter>>;
@@ -70,12 +70,16 @@ impl DetectorService {
                     match maybe_tick {
                         Some(Ok(tick)) => {
                             let mut graph = self.price_graph.lock().await;
-                            // TODO: Ingest the tick into the graph. This will likely involve
-                            // updating or creating an Edge. For now, we'll just log it.
-                            log::debug!("Received tick: {:?}", tick);
 
-                            // TODO: Get oracle prices. For now, use a dummy map.
-                            let oracle_prices = HashMap::new();
+                            // Ingest the tick into the graph
+                            if let Err(e) = self.ingest_tick_to_graph(&mut graph, &tick).await {
+                                log::error!("Failed to ingest tick: {}", e);
+                                continue;
+                            }
+                            log::debug!("Ingested tick: {:?}", tick);
+
+                            // Get oracle prices - for now, use mock prices based on common assets
+                            let oracle_prices = self.get_mock_oracle_prices();
 
                             // Run detection
                             match self.detector.detect_arbitrage(&graph.snapshot(), &oracle_prices).await {
@@ -103,5 +107,50 @@ impl DetectorService {
             }
         }
         Ok(())
+    }
+
+    /// Ingests a tick into the price graph by creating or updating an edge.
+    async fn ingest_tick_to_graph(
+        &self,
+        graph: &mut PriceGraphImpl,
+        tick: &MarketTick,
+    ) -> Result<()> {
+        use crate::exchange_const::test_exchange;
+        use crate::graph::{Edge, PoolModel};
+        use common::types::Quantity;
+        use std::time::Instant;
+
+        // Create an edge from the tick data
+        let edge = Edge {
+            pair: tick.pair.clone(),
+            exchange: test_exchange(), // Use a test exchange for now
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(tick.price * rust_decimal::Decimal::new(10000, 0)), // Mock reserve calculation
+                reserve_y: Quantity(rust_decimal::Decimal::new(10000, 0)), // Mock reserve
+                fee_bps: 30,                                               // 0.3% fee
+            },
+            last_updated: Instant::now(),
+        };
+
+        // Upsert the edge into the graph
+        graph.upsert_pool(edge);
+        Ok(())
+    }
+
+    /// Gets mock oracle prices for common assets.
+    fn get_mock_oracle_prices(&self) -> HashMap<Asset, rust_decimal::Decimal> {
+        use rust_decimal_macros::dec;
+
+        let mut prices = HashMap::new();
+
+        // Mock oracle prices in USD
+        prices.insert(Asset::from("USDC"), dec!(1.0));
+        prices.insert(Asset::from("USDT"), dec!(1.0));
+        prices.insert(Asset::from("APT"), dec!(8.0));
+        prices.insert(Asset::from("ETH"), dec!(2000.0));
+        prices.insert(Asset::from("BTC"), dec!(45000.0));
+        prices.insert(Asset::from("MOJO"), dec!(0.5));
+
+        prices
     }
 }

@@ -25,3 +25,31 @@ pub trait IsExecutor: Send + Sync {
     /// Executes a trade for the given arbitrage opportunity.
     async fn execute_trade(&self, opportunity: &ArbitrageOpportunity) -> Result<()>;
 }
+
+/// Dummy implementations for testing
+#[cfg(test)]
+pub mod test_implementations {
+    use super::*;
+
+    /// A dummy risk manager that always approves trades.
+    #[derive(Debug, Clone, Default)]
+    pub struct DummyRiskManager;
+
+    #[async_trait]
+    impl IsRiskManager for DummyRiskManager {
+        async fn assess_risk(&self, _opportunity: &ArbitrageOpportunity) -> Result<bool> {
+            Ok(true)
+        }
+    }
+
+    /// A dummy executor that always succeeds.
+    #[derive(Debug, Clone, Default)]
+    pub struct DummyExecutor;
+
+    #[async_trait]
+    impl IsExecutor for DummyExecutor {
+        async fn execute_trade(&self, _opportunity: &ArbitrageOpportunity) -> Result<()> {
+            Ok(())
+        }
+    }
+}

@@ -1,9 +1,10 @@
 //! Transaction building, gas estimation, and relaying.
 
 use aptos_sdk::types::LocalAccount;
+use async_trait::async_trait;
 use common::types::{Order, Quantity, TradeResult, TradeStatus};
-use std::fmt::Display;
-use rust_decimal_macros::dec; // For mock simulation
+use rust_decimal_macros::dec;
+use std::fmt::Display; // For mock simulation
 
 // Placeholder for a more sophisticated client or on-chain interaction mechanism
 pub struct BlockchainClient {
@@ -176,6 +177,56 @@ impl<E: Display + Clone> TradeExecutor<E> {
                     ),
                 }
             }
+        }
+    }
+}
+
+// Implementation of IsExecutor trait for integration with the detector
+#[async_trait]
+impl detector::traits::IsExecutor for TradeExecutor<dex_adapter_trait::Exchange> {
+    async fn execute_trade(
+        &self,
+        opportunity: &detector::traits::ArbitrageOpportunity,
+    ) -> anyhow::Result<()> {
+        log::info!(
+            "Executing arbitrage opportunity with net profit: {}",
+            opportunity.cycle_eval.net_profit
+        );
+
+        // Convert the arbitrage opportunity to a series of orders
+        // For now, we'll create a simplified order based on the first trade in the path
+        if let Some((asset, exchange)) = opportunity.path_quote.path.first() {
+            let order = Order {
+                id: format!("arb_{}", rand::random::<u32>()),
+                pair: common::types::AssetPair::new(
+                    asset.clone(),
+                    // Use the next asset in the path, or fallback to the current asset
+                    opportunity
+                        .path_quote
+                        .path
+                        .get(1)
+                        .map(|(a, _)| a.clone())
+                        .unwrap_or_else(|| asset.clone()),
+                ),
+                order_type: common::types::OrderType::Buy,
+                price: common::types::Price(opportunity.cycle_eval.net_profit),
+                quantity: opportunity.path_quote.amount_in,
+                exchange: *exchange,
+            };
+
+            let result = self.execute_trade(&order).await;
+
+            match result.status {
+                TradeStatus::Filled => {
+                    log::info!("Arbitrage trade executed successfully: {}", result.order_id);
+                    Ok(())
+                }
+                _ => {
+                    anyhow::bail!("Trade execution failed: {:?}", result)
+                }
+            }
+        } else {
+            anyhow::bail!("Empty arbitrage path")
         }
     }
 }
