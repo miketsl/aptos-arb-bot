@@ -68,11 +68,3 @@ The ingestor processes two main types of events:
 2. **SwapAfterEvent**: Real-time price updates
    - Updates sqrt_price, liquidity, and tick after each swap
    - Generates MarketUpdate for the detector
-
-## TODO
-
-- [ ] Implement tick map updates from swap events
-- [ ] Parse token pairs from pool addresses or event data
-- [ ] Add support for more DEX types (not just CLMM)
-- [ ] Add metrics and monitoring
-- [ ] Implement proper error recovery and reconnection logic
