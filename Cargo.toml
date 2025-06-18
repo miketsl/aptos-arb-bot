@@ -8,7 +8,6 @@ members = [
     "crates/analytics",
     "bin/arb-bot", 
     "crates/market-data-ingestor",
-    "crates/adapters/hyperion",
 ]
 
 resolver = "2"

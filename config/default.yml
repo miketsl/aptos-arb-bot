@@ -21,3 +21,25 @@ dexes:
 detector:
   interval_ms: 500
   min_profit_pct: 0.01
+
+# Market Data Ingestor Configuration
+market_data_ingestor:
+  processor_config:
+    type: market_data_ingestor
+  transaction_stream_config:
+    starting_version: null  # null means start from latest
+    grpc_data_stream_endpoint: "https://grpc.mainnet.aptoslabs.com:443"
+    grpc_auth_token: "YOUR_API_KEY_HERE"  # Replace with your actual API key
+    grpc_data_stream_api_key: "YOUR_API_KEY_HERE"  # Replace with your actual API key
+  market_data_config:
+    dexs:
+      - name: "Hyperion"
+        module_address: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039"
+        pool_snapshot_event_name: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039::pool::PoolSnapshot"
+        swap_event_name: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039::pool::SwapAfterEvent"
+        pools: []  # Add specific pool addresses here
+      - name: "ThalaSwap"
+        module_address: "0x48271d39d0b05bd6efca2278f22277d6fcc375504f9839fd73f74ace240861af"
+        pool_snapshot_event_name: "0x48271d39d0b05bd6efca2278f22277d6fcc375504f9839fd73f74ace240861af::pool::PoolSnapshot"
+        swap_event_name: "0x48271d39d0b05bd6efca2278f22277d6fcc375504f9839fd73f74ace240861af::pool::SwapAfterEvent"
+        pools: []  # Add specific pool addresses here
