@@ -1,9 +1,72 @@
-//! Main runtime for the arbitrage bot.
+use anyhow::Result;
+use clap::Parser;
+use core::{BotConfig, DummyRiskManager};
+use detector::service::{DexAdapters, PriceStream};
+use detector::{Detector, bellman_ford::DetectorConfig};
+use detector::traits::{IsExecutor, IsRiskManager};
+use executor::{BlockchainClient, TradeExecutor};
+use market_data_ingestor::{IndexerProcessorConfig, MarketDataIngestorProcessor};
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
 
-fn main() {
-    core::init();
-    detector::init();
-    executor::init();
-    analytics::init();
-    println!("Hello, arb-bot!");
+/// Command line arguments for arb-bot.
+#[derive(Parser, Debug)]
+struct Args {
+    /// Path to the bot configuration YAML
+    #[arg(long, default_value = "config/default.yml")]
+    config: String,
+    /// Path to the market data ingestor configuration YAML
+    #[arg(long, default_value = "config/market-data-ingestor.yml")]
+    mdi_config: String,
+}
+
+/// Convert a `MarketUpdate` into a generic market tick understood by the detector.
+fn update_to_tick(update: market_data_ingestor::types::MarketUpdate) -> common::types::Tick {
+    use common::types::{Asset, TradingPair, Tick};
+    use rust_decimal::Decimal;
+    let pair = TradingPair::new(Asset(update.token_pair.token0), Asset(update.token_pair.token1));
+    let price = Decimal::from(update.sqrt_price);
+    Tick { pair, price, timestamp: std::time::SystemTime::now() }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt().with_env_filter("info").init();
+    let args = Args::parse();
+
+    // Load main bot configuration
+    let bot_cfg = BotConfig::load(&args.config)?;
+    bot_cfg.validate()?;
+
+    // Load market-data ingestor configuration
+    let mdi_cfg = IndexerProcessorConfig::load(args.mdi_config.into())?;
+
+    // Channel between the ingestor and the detector
+    let (update_tx, update_rx) = mpsc::channel(100);
+    let price_stream = ReceiverStream::new(update_rx).map(|u| Ok(update_to_tick(u))) as PriceStream;
+
+    // Instantiate core services
+    let risk_manager: Arc<dyn IsRiskManager> = Arc::new(DummyRiskManager::new());
+    let executor: Arc<dyn IsExecutor> = Arc::new(TradeExecutor::<dex_adapter_trait::Exchange>::new(BlockchainClient::new(None)));
+    let dex_adapters: DexAdapters = DexAdapters::new();
+
+    let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
+    let detector = Detector::new(DetectorConfig::default(), price_stream, dex_adapters, risk_manager, executor, shutdown_rx);
+    let detector_handle = detector.spawn();
+
+    let mut mdi = MarketDataIngestorProcessor::new(mdi_cfg).await?;
+    mdi.set_update_sender(update_tx);
+    let mdi_handle = tokio::spawn(async move { mdi.run_processor().await });
+
+    tokio::signal::ctrl_c().await?;
+    shutdown_tx.send(()).await.ok();
+    mdi_handle.abort();
+
+    if let Err(e) = detector_handle.await.expect("detector task panicked") {
+        tracing::error!(error = %e, "Detector exited with error");
+    }
+
+    Ok(())
 }
