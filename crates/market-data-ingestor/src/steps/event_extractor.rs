@@ -21,7 +21,11 @@ impl EventExtractorStep {
             return false;
         };
 
-        trace!(checking_event_type = type_str, address = event_address, "Checking event");
+        trace!(
+            checking_event_type = type_str,
+            address = event_address,
+            "Checking event"
+        );
 
         if let Some(dex) = self.dex_configs.iter().find(|dex| {
             type_str == &dex.pool_snapshot_event_name || type_str == &dex.swap_event_name

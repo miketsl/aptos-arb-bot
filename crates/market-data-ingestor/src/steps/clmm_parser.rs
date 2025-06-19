@@ -45,9 +45,7 @@ impl ClmmParserStep {
         let dex = self
             .dex_configs
             .iter()
-            .find(|d| {
-                event_type == &d.pool_snapshot_event_name || event_type == &d.swap_event_name
-            })
+            .find(|d| event_type == &d.pool_snapshot_event_name || event_type == &d.swap_event_name)
             .cloned()
             .ok_or_else(|| anyhow!("Unknown event type: {}", event_type))?;
 
@@ -56,10 +54,10 @@ impl ClmmParserStep {
             // Handle pool snapshot - this serves as both initialization and reconciliation
             let snapshot: PoolSnapshotEvent = serde_json::from_str(&event.data)
                 .map_err(|e| anyhow!("Failed to parse PoolSnapshot: {}", e))?;
-            
+
             let pool_address = snapshot.pool_address.clone();
             self.update_pool_from_snapshot(&dex, snapshot)?;
-            
+
             // Generate update from the new state
             if let Some(pool_state) = self.pool_states.get(&pool_address) {
                 return Ok(Some(self.create_market_update(pool_state)));
@@ -68,7 +66,7 @@ impl ClmmParserStep {
             // Handle swap event
             let swap: SwapAfterEvent = serde_json::from_str(&event.data)
                 .map_err(|e| anyhow!("Failed to parse SwapAfterEvent: {}", e))?;
-            
+
             // Update pool state
             if let Some(pool_state) = self.pool_states.get_mut(&swap.pool_address) {
                 pool_state.sqrt_price = swap
@@ -145,13 +143,13 @@ impl ClmmParserStep {
         };
 
         self.pool_states.insert(pool_address.clone(), pool_state);
-        
+
         debug!(
             dex = dex.name,
             pool = %pool_address,
             "Pool state initialized/updated from snapshot"
         );
-        
+
         Ok(())
     }
 

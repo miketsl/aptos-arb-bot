@@ -3,7 +3,7 @@
 pub mod config;
 pub mod risk_manager;
 
-pub use config::{BotConfig, ConfigError, DexConfig, DetectorConfig};
+pub use config::{BotConfig, ConfigError, DetectorConfig, DexConfig};
 pub use risk_manager::{ConservativeRiskManager, DummyRiskManager};
 
 pub fn init() {}
