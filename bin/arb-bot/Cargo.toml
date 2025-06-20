@@ -19,3 +19,6 @@ rust_decimal = { version = "1.33", features = ["serde-with-str"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rustls = "0.23.5"
+serde_yaml = "0.9.34"
+dex-adapters = { version = "0.1.0", path = "../../crates/dex-adapters" }
+config = { path = "../../crates/config" }

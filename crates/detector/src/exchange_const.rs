@@ -1,6 +1,47 @@
 //! Exchange constants and helpers for the detector module.
 
-pub use dex_adapter_trait::Exchange;
+use std::fmt;
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum Exchange {
+    Tapp,
+    PancakeSwap,
+    Thala,
+    Hyperion,
+}
+
+impl Exchange {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Exchange::Tapp => "Tapp",
+            Exchange::PancakeSwap => "PancakeSwap",
+            Exchange::Thala => "Thala",
+            Exchange::Hyperion => "Hyperion",
+        }
+    }
+}
+
+impl std::str::FromStr for Exchange {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Tapp" => Ok(Exchange::Tapp),
+            "PancakeSwap" => Ok(Exchange::PancakeSwap),
+            "Thala" => Ok(Exchange::Thala),
+            "Hyperion" => Ok(Exchange::Hyperion),
+            _ => Err(anyhow::anyhow!("Invalid exchange: {}", s)),
+        }
+    }
+}
+
+impl fmt::Display for Exchange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
 
 /// Creates a test exchange for use in unit tests.
 pub fn test_exchange() -> Exchange {

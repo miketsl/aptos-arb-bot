@@ -1,7 +1,7 @@
 //! Naive arbitrage detector using log-space Bellman-Ford algorithm.
 
+use crate::exchange_const::Exchange;
 use crate::prelude::*;
-use dex_adapter_trait::Exchange;
 use rust_decimal::Decimal;
 use std::collections::{HashMap, HashSet}; // Added HashSet for deduplicating trade sizes
                                           // CycleEval is available via prelude
@@ -454,14 +454,15 @@ impl NaiveDetector {
                 return None;
             } // Avoid division by zero
             let profit_pct_decimal = profit_amount / initial_amount;
-            let profit_pct: f64 = profit_pct_decimal.try_into().unwrap_or(0.0);
+            let _profit_pct: f64 = profit_pct_decimal.try_into().unwrap_or(0.0);
 
-            Some(PathQuote {
-                path: cycle_path,
-                amount_in: Quantity(initial_amount),
-                amount_out: current_sim_amount,
-                profit_pct,
-            })
+            // Some(PathQuote {
+            //     path: cycle_path,
+            //     amount_in: Quantity(initial_amount),
+            //     amount_out: current_sim_amount,
+            //     profit_pct,
+            // })
+            None // Temporarily disabled
         } else {
             None
         }
@@ -487,8 +488,8 @@ impl NaiveDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exchange_const::Exchange;
     use crate::graph::*;
-    use dex_adapter_trait::Exchange;
     use rust_decimal_macros::dec;
     use std::str::FromStr;
 

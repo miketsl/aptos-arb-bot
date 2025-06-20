@@ -1,6 +1,6 @@
+use crate::exchange_const::Exchange;
 use crate::graph::{Edge, PoolModel, Tick};
 use common::types::{Asset, MarketUpdate, TradingPair};
-use dex_adapter_trait::Exchange;
 use rust_decimal::{Decimal, MathematicalOps};
 use std::str::FromStr;
 use std::time::Instant;

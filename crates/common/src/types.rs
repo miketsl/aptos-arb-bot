@@ -297,3 +297,11 @@ pub struct Tick {
     /// The timestamp of this update.
     pub timestamp: std::time::SystemTime,
 }
+
+// Re-exporting the Transaction and Event types from the Aptos indexer processor SDK
+// to make them available throughout the workspace without adding the SDK as a direct
+// dependency to other crates. This helps in centralizing dependency management.
+pub use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::Event;
+pub use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::{
+    transaction::TxnData, Transaction,
+};

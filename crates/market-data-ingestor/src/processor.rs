@@ -1,21 +1,30 @@
-use crate::config::IndexerProcessorConfig;
-use crate::steps::{ClmmParserStep, DetectorPushStep, EventExtractorStep};
+use crate::ingestor_config::IndexerProcessorConfig;
+use crate::steps::{DetectorPushStep, EventExtractorStep, Parser};
 use crate::types::MarketUpdate;
 use anyhow::Result;
 use aptos_indexer_processor_sdk::aptos_indexer_transaction_stream::TransactionStream;
+use dex_adapter_trait::DexAdapter;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
 pub struct MarketDataIngestorProcessor {
     config: IndexerProcessorConfig,
+    parser: Parser,
     update_sender: Option<mpsc::Sender<MarketUpdate>>,
     shutdown_rx: Option<oneshot::Receiver<()>>,
 }
 
 impl MarketDataIngestorProcessor {
-    pub async fn new(config: IndexerProcessorConfig) -> Result<Self> {
+    pub async fn new(
+        config: IndexerProcessorConfig,
+        adapters: HashMap<String, Arc<dyn DexAdapter>>,
+    ) -> Result<Self> {
+        let parser = Parser::new(adapters);
         Ok(Self {
             config,
+            parser,
             update_sender: None,
             shutdown_rx: None,
         })
@@ -34,7 +43,6 @@ impl MarketDataIngestorProcessor {
     pub async fn run_processor(mut self) -> Result<()> {
         info!("Starting Market Data Ingestor processor");
 
-        // Ensure we have a channel to push updates
         let update_sender = self
             .update_sender
             .take()
@@ -45,12 +53,9 @@ impl MarketDataIngestorProcessor {
             .take()
             .ok_or_else(|| anyhow::anyhow!("Shutdown receiver not set"))?;
 
-        // Get starting version
         let starting_version = self.config.transaction_stream_config.starting_version;
-
         info!(starting_version = ?starting_version, "Starting from version");
 
-        // Create the transaction stream
         let mut transaction_stream =
             TransactionStream::new(self.config.transaction_stream_config.clone()).await?;
 
@@ -58,16 +63,13 @@ impl MarketDataIngestorProcessor {
         let mut event_extractor =
             EventExtractorStep::new(self.config.market_data_config.dexs.clone());
 
-        let mut clmm_parser = ClmmParserStep::new(self.config.market_data_config.dexs.clone());
-
         let detector_push = DetectorPushStep::new(update_sender);
 
-        // Main processing loop
         info!("Starting main processing loop");
 
         loop {
             tokio::select! {
-                biased; // Prioritize shutdown signal
+                biased;
 
                 _ = &mut shutdown_rx => {
                     warn!("Shutdown signal received. Exiting MDI processing loop.");
@@ -87,10 +89,10 @@ impl MarketDataIngestorProcessor {
                                 let version = transaction.version;
 
                                 // Extract relevant events
-                                match event_extractor.process_transaction(transaction).await {
+                                match event_extractor.process_transaction(transaction.clone()).await {
                                     Ok(events) if !events.is_empty() => {
                                         // Parse events into market updates
-                                        match clmm_parser.process_events(events).await {
+                                        match self.parser.process_events(&events, &transaction) {
                                             Ok(updates) if !updates.is_empty() => {
                                                 // Push updates to detector
                                                 if let Err(e) = detector_push.push_updates(updates).await {

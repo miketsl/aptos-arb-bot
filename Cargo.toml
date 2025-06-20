@@ -7,7 +7,7 @@ members = [
     "crates/executor",
     "crates/analytics",
     "bin/arb-bot", 
-    "crates/market-data-ingestor",
+    "crates/market-data-ingestor", "crates/dex-adapters", "crates/config",
 ]
 
 resolver = "2"

@@ -1,11 +1,12 @@
 use crate::bellman_ford::{DetectorConfig, NaiveDetector};
+use crate::exchange_const::Exchange;
 use crate::graph::{PriceGraph, PriceGraphImpl, PriceGraphSnapshot};
 use crate::prelude::*;
 use crate::traits::{IsExecutor, IsRiskManager};
 use crate::translator;
 use anyhow::Result;
 use common::types::MarketUpdate;
-use dex_adapter_trait::{DexAdapter, Exchange};
+use dex_adapter_trait::DexAdapter;
 use futures::stream::{Stream, StreamExt};
 use std::collections::HashMap;
 use std::pin::Pin;
