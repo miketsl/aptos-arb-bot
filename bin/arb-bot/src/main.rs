@@ -9,7 +9,6 @@ use market_data_ingestor::{IndexerProcessorConfig, MarketDataIngestorProcessor};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_stream::StreamExt;
 use tracing::error;
 
 /// Command line arguments for arb-bot.
@@ -21,22 +20,6 @@ struct Args {
     /// Path to the market data ingestor configuration YAML
     #[arg(long, default_value = "config/market-data-ingestor.yml")]
     mdi_config: String,
-}
-
-/// Convert a `MarketUpdate` into a generic market tick understood by the detector.
-fn update_to_tick(update: market_data_ingestor::types::MarketUpdate) -> common::types::Tick {
-    use common::types::{Asset, Tick, TradingPair};
-    use rust_decimal::Decimal;
-    let pair = TradingPair::new(
-        Asset(update.token_pair.token0),
-        Asset(update.token_pair.token1),
-    );
-    let price = Decimal::from(update.sqrt_price);
-    Tick {
-        pair,
-        price,
-        timestamp: std::time::SystemTime::now(),
-    }
 }
 
 #[tokio::main]
@@ -53,7 +36,7 @@ async fn main() -> Result<()> {
 
     // Channel between the ingestor and the detector
     let (update_tx, update_rx) = mpsc::channel(100);
-    let price_stream = Box::pin(ReceiverStream::new(update_rx).map(|u| Ok(update_to_tick(u))));
+    let price_stream = Box::pin(ReceiverStream::new(update_rx));
 
     // Instantiate core services
     let risk_manager: Arc<dyn IsRiskManager> = Arc::new(DummyRiskManager::new());

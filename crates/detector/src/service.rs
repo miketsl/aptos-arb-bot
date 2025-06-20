@@ -1,9 +1,10 @@
 use crate::bellman_ford::{DetectorConfig, NaiveDetector};
-use crate::graph::{PriceGraph, PriceGraphImpl};
+use crate::graph::{PriceGraph, PriceGraphImpl, PriceGraphSnapshot};
 use crate::prelude::*;
 use crate::traits::{IsExecutor, IsRiskManager};
+use crate::translator;
 use anyhow::Result;
-
+use common::types::MarketUpdate;
 use dex_adapter_trait::{DexAdapter, Exchange};
 use futures::stream::{Stream, StreamExt};
 use std::collections::HashMap;
@@ -12,8 +13,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
 
-/// A stream of price ticks.
-pub type PriceStream = Pin<Box<dyn Stream<Item = Result<MarketTick>> + Send + Sync>>;
+/// A stream of market updates.
+pub type PriceStream = Pin<Box<dyn Stream<Item = MarketUpdate> + Send + Sync>>;
 
 /// A collection of DEX adapters, keyed by their exchange identifier.
 pub type DexAdapters = HashMap<Exchange, Arc<dyn DexAdapter>>;
@@ -59,24 +60,29 @@ impl DetectorService {
     }
 
     /// Starts the main detection loop.
-    pub(crate) async fn run(mut self) -> Result<()> {
+    pub(crate) async fn run(mut self) -> Result<PriceGraphImpl> {
         loop {
             tokio::select! {
                 _ = self.shutdown_rx.recv() => {
                     log::info!("DetectorService shutting down.");
                     break;
                 }
-                maybe_tick = self.price_stream.next() => {
-                    match maybe_tick {
-                        Some(Ok(tick)) => {
+                maybe_update = self.price_stream.next() => {
+                    match maybe_update {
+                        Some(update) => {
                             let mut graph = self.price_graph.lock().await;
 
-                            // Ingest the tick into the graph
-                            if let Err(e) = self.ingest_tick_to_graph(&mut graph, &tick).await {
-                                log::error!("Failed to ingest tick: {}", e);
-                                continue;
+                            // Ingest the market update into the graph
+                            match translator::market_update_to_edge(&update) {
+                                Ok(edge) => {
+                                    graph.upsert_pool(edge);
+                                    log::debug!("Ingested market update for pool: {}", update.pool_address);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to translate market update to edge: {}", e);
+                                    continue;
+                                }
                             }
-                            log::debug!("Ingested tick: {:?}", tick);
 
                             // Get oracle prices - for now, use mock prices based on common assets
                             let oracle_prices = self.get_mock_oracle_prices();
@@ -95,9 +101,6 @@ impl DetectorService {
                                 }
                             }
                         }
-                        Some(Err(e)) => {
-                            log::error!("Error receiving tick: {}", e);
-                        }
                         None => {
                             // Stream ended
                             break;
@@ -106,10 +109,20 @@ impl DetectorService {
                 }
             }
         }
-        Ok(())
+        // Return the final state of the graph
+        let graph = Arc::try_unwrap(self.price_graph)
+            .map_err(|_| anyhow::anyhow!("Failed to unwrap Arc for price_graph"))?
+            .into_inner();
+        Ok(graph)
+    }
+
+    /// Returns a snapshot of the current price graph.
+    pub(crate) async fn get_graph_snapshot(&self) -> PriceGraphSnapshot {
+        self.price_graph.lock().await.snapshot()
     }
 
     /// Ingests a tick into the price graph by creating or updating an edge.
+    #[allow(dead_code)]
     async fn ingest_tick_to_graph(
         &self,
         graph: &mut PriceGraphImpl,

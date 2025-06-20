@@ -61,13 +61,18 @@ impl Detector {
     }
 
     /// Spawns the detector in a background task and returns a join handle.
-    pub fn spawn(self) -> tokio::task::JoinHandle<Result<()>> {
+    pub fn spawn(self) -> tokio::task::JoinHandle<Result<PriceGraphImpl>> {
         tokio::spawn(async move { self.run().await })
     }
 
     /// Starts the detector's main loop.
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(self) -> Result<PriceGraphImpl> {
         self.service.run().await
+    }
+
+    /// Returns a snapshot of the price graph.
+    pub async fn get_graph_snapshot(&self) -> PriceGraphSnapshot {
+        self.service.get_graph_snapshot().await
     }
 }
 

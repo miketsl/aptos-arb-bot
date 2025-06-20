@@ -31,12 +31,29 @@ impl IsExecutor for DummyExecutor {
     }
 }
 
+use common::types::{MarketUpdate, TokenPair};
+
+fn mock_market_update() -> MarketUpdate {
+    MarketUpdate {
+        pool_address: "0x1".to_string(),
+        dex_name: "Tapp".to_string(),
+        token_pair: TokenPair {
+            token0: "0x1::aptos_coin::AptosCoin".to_string(),
+            token1: "0x1::coin::USDC".to_string(),
+        },
+        sqrt_price: 0,
+        liquidity: 0,
+        tick: 0,
+        fee_bps: 0,
+        tick_map: HashMap::new(),
+    }
+}
+
 #[tokio::test]
 async fn test_detector_runs_with_noop_services() {
     // Create a detector with no-op services
     let config = DetectorConfig::default();
-    let price_stream = Box::pin(stream::empty::<Result<common::types::Tick, anyhow::Error>>())
-        as detector::service::PriceStream;
+    let price_stream = Box::pin(stream::empty::<MarketUpdate>()) as detector::service::PriceStream;
     let dex_adapters = HashMap::new();
     let risk_manager = Arc::new(DummyRiskManager);
     let executor = Arc::new(DummyExecutor);
@@ -70,25 +87,12 @@ async fn test_detector_runs_with_noop_services() {
 
 #[tokio::test]
 async fn test_detector_with_mock_price_stream() {
-    use common::types::{Asset, Tick, TradingPair};
     use futures::stream;
-    use rust_decimal_macros::dec;
 
     // Create a price stream with some mock data
-    let mock_ticks = vec![
-        Ok(Tick {
-            pair: TradingPair::new(Asset::from("USDC"), Asset::from("APT")),
-            price: dec!(8.0),
-            timestamp: std::time::SystemTime::now(),
-        }),
-        Ok(Tick {
-            pair: TradingPair::new(Asset::from("APT"), Asset::from("ETH")),
-            price: dec!(0.004),
-            timestamp: std::time::SystemTime::now(),
-        }),
-    ];
+    let mock_updates = vec![mock_market_update(), mock_market_update()];
 
-    let price_stream = Box::pin(stream::iter(mock_ticks)) as detector::service::PriceStream;
+    let price_stream = Box::pin(stream::iter(mock_updates)) as detector::service::PriceStream;
 
     let config = DetectorConfig::default();
     let dex_adapters = HashMap::new();

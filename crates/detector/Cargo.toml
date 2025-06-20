@@ -23,3 +23,11 @@ async-trait = "0.1.80"
 [features]
 default = []
 api = []
+
+[[test]]
+name = "e2e_mdi_detector"
+harness = false
+
+[dev-dependencies]
+tokio-stream = "0.1"
+market-data-ingestor = { path = "../market-data-ingestor" }
