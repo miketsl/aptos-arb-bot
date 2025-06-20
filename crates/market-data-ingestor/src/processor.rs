@@ -92,7 +92,7 @@ impl MarketDataIngestorProcessor {
                                 match event_extractor.process_transaction(transaction.clone()).await {
                                     Ok(events) if !events.is_empty() => {
                                         // Parse events into market updates
-                                        match self.parser.process_events(&events, &transaction) {
+                                        match self.parser.process_events(&events) {
                                             Ok(updates) if !updates.is_empty() => {
                                                 // Push updates to detector
                                                 if let Err(e) = detector_push.push_updates(updates).await {

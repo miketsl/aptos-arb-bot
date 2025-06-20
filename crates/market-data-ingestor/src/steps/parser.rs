@@ -1,5 +1,5 @@
 use anyhow::Result;
-use common::types::{Event, MarketUpdate, Transaction};
+use common::types::{Event, MarketUpdate};
 use dex_adapter_trait::DexAdapter;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,11 +13,11 @@ impl Parser {
         Self { adapters }
     }
 
-    pub fn process_events(&self, events: &[Event], txn: &Transaction) -> Result<Vec<MarketUpdate>> {
+    pub fn process_events(&self, events: &[Event]) -> Result<Vec<MarketUpdate>> {
         let mut updates = Vec::new();
         for event in events {
             if let Some(adapter) = self.adapters.get(&event.type_str) {
-                if let Some(update) = adapter.parse_transaction(txn)? {
+                if let Some(update) = adapter.parse_event(event)? {
                     updates.push(update);
                 }
             }
