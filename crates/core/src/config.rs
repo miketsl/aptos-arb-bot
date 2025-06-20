@@ -30,8 +30,7 @@ pub struct DetectorConfig {
 impl BotConfig {
     /// Load configuration from a YAML file
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
-        let content =
-            std::fs::read_to_string(path.as_ref()).map_err(ConfigError::IoError)?;
+        let content = std::fs::read_to_string(path.as_ref()).map_err(ConfigError::IoError)?;
 
         let mut config: BotConfig =
             serde_yaml::from_str(&content).map_err(|e| ConfigError::ParseError(e.to_string()))?;
