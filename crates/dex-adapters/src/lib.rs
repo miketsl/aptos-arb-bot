@@ -98,7 +98,12 @@ impl DexAdapter for HyperionAdapter {
                 let pool_id = swap.pool_id.clone();
 
                 if let Some(mut pool_state) = self.pools.get_mut(&pool_id) {
-                    // A swap event triggers a market update. We emit the state *before* the swap.
+                    // First, update our internal state to reflect the post-swap reality.
+                    pool_state.sqrt_price = swap.sqrt_price;
+                    pool_state.liquidity = swap.liquidity;
+                    pool_state.tick = swap.tick;
+
+                    // Then, create the market update from the *new* state.
                     let market_update = MarketUpdate {
                         pool_address: pool_id.clone(),
                         dex_name: self.id().to_string(),
@@ -109,11 +114,6 @@ impl DexAdapter for HyperionAdapter {
                         fee_bps: pool_state.fee_bps,
                         tick_map: pool_state.tick_map.clone(),
                     };
-
-                    // Then, we update our internal state to reflect the post-swap reality.
-                    pool_state.sqrt_price = swap.sqrt_price;
-                    pool_state.liquidity = swap.liquidity;
-                    pool_state.tick = swap.tick;
 
                     Ok(Some(market_update))
                 } else {
@@ -176,6 +176,12 @@ impl DexAdapter for ThalaAdapter {
                 let pool_id = swap.pool_id.clone();
 
                 if let Some(mut pool_state) = self.pools.get_mut(&pool_id) {
+                    // First, update our internal state to reflect the post-swap reality.
+                    pool_state.sqrt_price = swap.sqrt_price;
+                    pool_state.liquidity = swap.liquidity;
+                    pool_state.tick = swap.tick;
+
+                    // Then, create the market update from the *new* state.
                     let market_update = MarketUpdate {
                         pool_address: pool_id.clone(),
                         dex_name: self.id().to_string(),
@@ -186,10 +192,6 @@ impl DexAdapter for ThalaAdapter {
                         fee_bps: pool_state.fee_bps,
                         tick_map: pool_state.tick_map.clone(),
                     };
-
-                    pool_state.sqrt_price = swap.sqrt_price;
-                    pool_state.liquidity = swap.liquidity;
-                    pool_state.tick = swap.tick;
 
                     Ok(Some(market_update))
                 } else {
