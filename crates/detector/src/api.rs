@@ -1,8 +1,9 @@
 //! External API for the detector service.
 
 use crate::bellman_ford::DetectorConfig;
-use crate::service::{DetectorService, DexAdapters, PriceStream};
+use crate::service::DexAdapters;
 use crate::traits::{IsExecutor, IsRiskManager};
+use crate::{Detector, PriceStream};
 use anyhow::Result;
 use async_trait::async_trait;
 
@@ -40,6 +41,8 @@ pub struct DetectorStatus {
 /// Implementation of the detector API.
 pub struct DetectorApiImpl {
     config: DetectorConfig,
+    #[allow(dead_code)] // This is not used, as the API creates a new stream on start
+    price_stream: PriceStream,
     dex_adapters: DexAdapters,
     risk_manager: Arc<dyn IsRiskManager>,
     executor: Arc<dyn IsExecutor>,
@@ -49,13 +52,14 @@ impl DetectorApiImpl {
     /// Creates a new detector API implementation.
     pub fn new(
         config: DetectorConfig,
-        _price_stream: PriceStream,
+        price_stream: PriceStream,
         dex_adapters: DexAdapters,
         risk_manager: Arc<dyn IsRiskManager>,
         executor: Arc<dyn IsExecutor>,
     ) -> Self {
         Self {
             config,
+            price_stream,
             dex_adapters,
             risk_manager,
             executor,
@@ -68,19 +72,23 @@ impl DetectorApi for DetectorApiImpl {
     async fn start(&self) -> Result<JoinHandle<Result<()>>> {
         let (_shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
-        // Create a new service instance for each start
-        let service = DetectorService::new(
+        // Create a new detector instance for each start
+        let detector = Detector::new(
             self.config.clone(),
-            // Note: This is a simplified approach. In practice, you'd want to
-            // handle stream ownership more carefully
-            Box::pin(futures::stream::empty::<Result<crate::prelude::MarketTick>>()) as PriceStream, // Placeholder stream
+            // This is a placeholder and will be replaced by a real stream
+            Box::pin(futures::stream::empty::<common::types::MarketUpdate>()),
             self.dex_adapters.clone(),
             self.risk_manager.clone(),
             self.executor.clone(),
             shutdown_rx,
         );
 
-        let handle = tokio::spawn(async move { service.run().await });
+        let handle = tokio::spawn(async move {
+            match detector.run().await {
+                Ok(_) => Ok(()), // Discard the graph, return unit type
+                Err(e) => Err(e),
+            }
+        });
 
         Ok(handle)
     }
@@ -144,8 +152,7 @@ mod tests {
     #[tokio::test]
     async fn test_detector_api_creation() {
         let config = DetectorConfig::default();
-        let price_stream =
-            Box::pin(stream::empty::<Result<crate::prelude::MarketTick>>()) as PriceStream;
+        let price_stream = Box::pin(stream::empty::<common::types::MarketUpdate>());
         let dex_adapters = HashMap::new();
         let risk_manager = Arc::new(DummyRiskManager);
         let executor = Arc::new(DummyExecutor);
@@ -156,8 +163,7 @@ mod tests {
     #[tokio::test]
     async fn test_detector_status() {
         let config = DetectorConfig::default();
-        let price_stream =
-            Box::pin(stream::empty::<Result<crate::prelude::MarketTick>>()) as PriceStream;
+        let price_stream = Box::pin(stream::empty::<common::types::MarketUpdate>());
         let dex_adapters = HashMap::new();
         let risk_manager = Arc::new(DummyRiskManager);
         let executor = Arc::new(DummyExecutor);
