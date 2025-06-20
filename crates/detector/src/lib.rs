@@ -9,6 +9,7 @@ pub mod prelude;
 pub mod service;
 pub mod sizing;
 pub mod traits;
+pub mod translator;
 
 use crate::bellman_ford::DetectorConfig;
 use crate::service::{DetectorService, DexAdapters, PriceStream};

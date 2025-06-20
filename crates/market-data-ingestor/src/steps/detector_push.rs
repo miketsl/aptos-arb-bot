@@ -1,4 +1,4 @@
-use crate::types::MarketUpdate;
+use super::super::types::MarketUpdate;
 use anyhow::Result;
 use tokio::sync::mpsc;
 use tracing::{debug, error};

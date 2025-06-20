@@ -1,4 +1,6 @@
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 
 /// Represents a price, typically using a high-precision decimal type.
@@ -22,7 +24,7 @@ impl fmt::Display for Quantity {
 }
 
 /// Represents a financial asset, identified by a symbol string.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Asset(pub String);
 
 impl fmt::Display for Asset {
@@ -158,6 +160,33 @@ pub struct CycleEval {
     pub gas_estimate: u64,
     pub gas_unit_price: rust_decimal::Decimal,
     pub net_profit: rust_decimal::Decimal,
+}
+
+/// Token pair for CLMM pools
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct TokenPair {
+    pub token0: String,
+    pub token1: String,
+}
+
+/// Information about a specific tick in the CLMM
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TickInfo {
+    pub liquidity_net: i128,
+    pub liquidity_gross: u128,
+}
+
+/// Market update to be sent to the detector
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketUpdate {
+    pub pool_address: String,
+    pub dex_name: String,
+    pub token_pair: TokenPair,
+    pub sqrt_price: u128,
+    pub liquidity: u128,
+    pub tick: u32,
+    pub fee_bps: u32,
+    pub tick_map: HashMap<i32, TickInfo>,
 }
 
 #[cfg(test)]

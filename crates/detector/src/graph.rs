@@ -31,6 +31,15 @@ pub enum PoolModel {
     },
 }
 
+impl PoolModel {
+    pub fn fee_bps(&self) -> u16 {
+        match self {
+            PoolModel::ConstantProduct { fee_bps, .. } => *fee_bps,
+            PoolModel::ConcentratedLiquidity { fee_bps, .. } => *fee_bps,
+        }
+    }
+}
+
 /// Represents a tick in a concentrated liquidity pool.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tick {
