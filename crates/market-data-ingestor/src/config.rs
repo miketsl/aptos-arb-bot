@@ -1,6 +1,6 @@
+use crate::types::MarketDataIngestorConfig;
 use anyhow::Result;
 use aptos_indexer_processor_sdk::aptos_indexer_transaction_stream::TransactionStreamConfig;
-use crate::types::MarketDataIngestorConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

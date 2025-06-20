@@ -7,10 +7,12 @@ use tokio::sync::mpsc;
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
-    rustls::crypto::ring::default_provider().install_default().unwrap();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .unwrap();
     let args = ServerArgs::parse();
     let config = IndexerProcessorConfig::load(args.config_path)?;
-    
+
     // Create a channel for market updates
     let (tx, mut rx) = mpsc::channel(100);
 
@@ -25,7 +27,7 @@ async fn main() -> Result<()> {
 
     let mut processor = MarketDataIngestorProcessor::new(config).await?;
     processor.set_update_sender(tx);
-    
+
     // Run the processor and wait for it and the detector task to complete
     tokio::select! {
         res = processor.run_processor() => {

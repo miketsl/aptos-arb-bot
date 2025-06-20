@@ -10,3 +10,12 @@ dex-adapter-trait = { path = "../../crates/dex-adapter-trait" }
 detector = { path = "../../crates/detector" }
 executor = { path = "../../crates/executor" }
 analytics = { path = "../../crates/analytics" }
+market-data-ingestor = { path = "../../crates/market-data-ingestor" }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+anyhow = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+rust_decimal = { version = "1.33", features = ["serde-with-str"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rustls = "0.23.5"

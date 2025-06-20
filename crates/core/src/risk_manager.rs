@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use common::types::CycleEval;
 use detector::traits::{ArbitrageOpportunity, IsRiskManager};
 use rust_decimal::Decimal;
 
@@ -81,7 +80,7 @@ impl IsRiskManager for ConservativeRiskManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::types::{Asset, PathQuote, Quantity};
+    use common::types::{Asset, CycleEval, PathQuote, Quantity};
     use dex_adapter_trait::Exchange;
     use rust_decimal_macros::dec;
 
