@@ -81,7 +81,7 @@ impl IsRiskManager for ConservativeRiskManager {
 mod tests {
     use super::*;
     use common::types::{Asset, CycleEval, PathQuote, Quantity};
-    use dex_adapter_trait::Exchange;
+    use detector::exchange_const::Exchange;
     use rust_decimal_macros::dec;
 
     fn create_test_opportunity(net_profit: Decimal) -> ArbitrageOpportunity {

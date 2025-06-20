@@ -182,16 +182,11 @@ market_data_config:
   # DEX configurations with adapter settings
   dexs:
     - name: "Hyperion"
-      adapter: "clmm"
-      module_address: "0x8b4a2..."
+      module_address: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039"
+      pool_snapshot_event_name: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039::pool::PoolSnapshot"
+      swap_event_name: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039::pool::SwapAfterEvent"
       settings:
         tick_spacing_threshold: 10
-    
-    - name: "PancakeSwap"
-      adapter: "amm"
-      module_address: "0x1234..."
-      settings:
-        fee_tiers: [100, 500, 3000]
 ```
 
 ## Performance Considerations

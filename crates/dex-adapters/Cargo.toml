@@ -1,0 +1,10 @@
+[package]
+name = "dex-adapters"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+common = { path = "../common" }
+dex-adapter-trait = { path = "../dex-adapter-trait" }

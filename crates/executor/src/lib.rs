@@ -3,6 +3,7 @@
 use aptos_sdk::types::LocalAccount;
 use async_trait::async_trait;
 use common::types::{Order, Quantity, TradeResult, TradeStatus};
+use detector::exchange_const::Exchange;
 use rust_decimal_macros::dec;
 use std::fmt::Display; // For mock simulation
 
@@ -183,7 +184,7 @@ impl<E: Display + Clone> TradeExecutor<E> {
 
 // Implementation of IsExecutor trait for integration with the detector
 #[async_trait]
-impl detector::traits::IsExecutor for TradeExecutor<dex_adapter_trait::Exchange> {
+impl detector::traits::IsExecutor for TradeExecutor<Exchange> {
     async fn execute_trade(
         &self,
         opportunity: &detector::traits::ArbitrageOpportunity,
@@ -242,7 +243,7 @@ pub fn init() {
 mod tests {
     use super::*;
     use common::types::{Asset, AssetPair, OrderType, Price, Quantity};
-    use dex_adapter_trait::Exchange;
+    use detector::exchange_const::Exchange;
     use rust_decimal_macros::dec;
 
     // Helper to create a default BlockchainClient for tests

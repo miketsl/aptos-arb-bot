@@ -1,45 +1,47 @@
-dexes:
-  - name: hyperion          # CLMM
-    module_addr: "0xHYP"
-    grpc_indexer: "https://grpc.mainnet.aptoslabs.com:443" # Example, ensure this is the correct stream endpoint
-    grpc_auth_token: "YOUR_API_KEY_HERE" # Replace with your actual API key
-    starting_version: 0 # Or your desired starting version
-    fullnode_rpc: "https://fullnode.mainnet.aptoslabs.com"
-    pairs: ["APT/USDC","APT/USDT"]
-    relevant_event_types: # Add specific event types for Hyperion
-      - "0xHYP::dex_module::SwapEvent" # Example: Replace with actual event type
-      - "0xHYP::dex_module::PoolSnapshotEvent" # Example: Replace with actual event type
-  - name: thala
-    module_addr: "0xTHL"
-    grpc_indexer: "https://grpc.mainnet.aptoslabs.com:443" # Example, ensure this is the correct stream endpoint
-    grpc_auth_token: "YOUR_API_KEY_HERE" # Replace with your actual API key
-    starting_version: 0 # Or your desired starting version
-    fullnode_rpc: "https://fullnode.mainnet.aptoslabs.com"
-    pairs: ["APT/USDC","APT/USDT"]
-    relevant_event_types: # Add specific event types for Thala, if it uses a similar streaming mechanism
-      - "0xTHL::amm_module::SwapEvent" # Example: Replace with actual event type
-detector:
-  interval_ms: 500
-  min_profit_pct: 0.01
+# Enhanced configuration structure
+transaction_stream_config:
+  starting_version: null
+  indexer_grpc_data_service_address: "https://grpc.mainnet.aptoslabs.com:443"
+  auth_token: "your_token_here"
+  request_name_header: "market-data-ingestor"
 
-# Market Data Ingestor Configuration
-market_data_ingestor:
-  processor_config:
-    type: market_data_ingestor
-  transaction_stream_config:
-    starting_version: null  # null means start from latest
-    grpc_data_stream_endpoint: "https://grpc.mainnet.aptoslabs.com:443"
-    grpc_auth_token: "YOUR_API_KEY_HERE"  # Replace with your actual API key
-    grpc_data_stream_api_key: "YOUR_API_KEY_HERE"  # Replace with your actual API key
-  market_data_config:
-    dexs:
-      - name: "Hyperion"
-        module_address: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039"
-        pool_snapshot_event_name: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039::pool::PoolSnapshot"
-        swap_event_name: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039::pool::SwapAfterEvent"
-        pools: []  # Add specific pool addresses here
-      - name: "ThalaSwap"
-        module_address: "0x48271d39d0b05bd6efca2278f22277d6fcc375504f9839fd73f74ace240861af"
-        pool_snapshot_event_name: "0x48271d39d0b05bd6efca2278f22277d6fcc375504f9839fd73f74ace240861af::pool::PoolSnapshot"
-        swap_event_name: "0x48271d39d0b05bd6efca2278f22277d6fcc375504f9839fd73f74ace240861af::pool::SwapAfterEvent"
-        pools: []  # Add specific pool addresses here
+market_data_config:
+  # Data source configuration
+  data_source:
+    type: "grpc"  # or "file"
+    file:
+      path: "./recordings/mainnet_2024_01.pb"
+      replay_speed: 1.0  # 1.0 = real-time, 0 = as fast as possible
+  
+  # Filter configuration
+  filters:
+    mode: "token_pairs"  # or "token" or "all"
+    token_pairs:
+      - ["APT", "USDC"]
+      - ["APT", "USDT"]
+    # OR for single token mode:
+    # token: "APT"
+  
+  # DEX configurations with adapter settings
+  dexs:
+    - name: "Hyperion"
+      module_address: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039"
+      events:
+        swap: "::pool::SwapAfterEvent"
+        snapshot: "::pool::PoolSnapshot"
+      settings:
+        tick_spacing_threshold: 10
+    
+    - name: "ThalaSwap"
+      module_address: "0x48271d39d0b05bd6efca2278f22277d6fcc375504f9839fd73f74ace240861af"
+      events:
+        swap: "::pool::SwapAfterEvent"
+        snapshot: "::pool::PoolSnapshot"
+      settings: {}
+
+    - name: "Tapp"
+      module_address: "0xtapp_module_address"
+      events:
+        swap: "::events::Swap"
+        snapshot: "::events::PoolSnapshot"
+      settings: {}

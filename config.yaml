@@ -1,0 +1,15 @@
+market_data_config:
+  data_source:
+    type: "grpc"
+  filters:
+    mode: "all"
+  dexs:
+    - name: "Hyperion"
+      adapter: "HyperionAdapter"
+      module_address: "0xhyperion_module_address"
+    - name: "Thala"
+      adapter: "ThalaAdapter"
+      module_address: "0xthala_module_address"
+    - name: "Tapp"
+      adapter: "TappAdapter"
+      module_address: "0xtapp_module_address"

@@ -1,6 +1,6 @@
+use crate::exchange_const::Exchange;
 use crate::prelude::*;
 use common::types::{Asset, Quantity, TradingPair};
-use dex_adapter_trait::Exchange;
 use petgraph::graphmap::DiGraphMap;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
@@ -368,8 +368,8 @@ impl PriceGraph for PriceGraphImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exchange_const::Exchange;
     use common::types::{Asset, Quantity, TradingPair};
-    use dex_adapter_trait::Exchange;
     use rust_decimal_macros::dec;
     use std::str::FromStr;
 

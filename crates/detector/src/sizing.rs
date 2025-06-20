@@ -228,8 +228,8 @@ impl TradeSizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exchange_const::Exchange;
     use crate::graph::*;
-    use dex_adapter_trait::Exchange;
     use rust_decimal_macros::dec;
     use std::str::FromStr;
 

@@ -1,7 +1,7 @@
+use crate::exchange_const::Exchange;
 use anyhow::Result;
 use async_trait::async_trait;
 use common::types::{CycleEval, PathQuote};
-use dex_adapter_trait::Exchange;
 
 /// Represents a potentially profitable arbitrage opportunity, combining the trade path
 /// and the financial evaluation.

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use aptos_indexer_processor_sdk::server_framework::ServerArgs;
 use clap::Parser;
-use market_data_ingestor::{config::IndexerProcessorConfig, MarketDataIngestorProcessor};
+use market_data_ingestor::{ingestor_config::IndexerProcessorConfig, MarketDataIngestorProcessor};
 use tokio::sync::mpsc;
 
 #[tokio::main]
@@ -11,7 +11,15 @@ async fn main() -> Result<()> {
         .install_default()
         .unwrap();
     let args = ServerArgs::parse();
-    let config = IndexerProcessorConfig::load(args.config_path)?;
+    let config_from_path = config_lib::load_config_from_path(
+        args.config_path.to_str().expect("Path is not valid UTF-8"),
+    )
+    .await
+    .expect("Failed to load config");
+    let config = IndexerProcessorConfig::new(
+        config_from_path.transaction_stream_config,
+        config_from_path.market_data_config,
+    );
 
     // Create a channel for market updates
     let (tx, mut rx) = mpsc::channel(100);
@@ -25,7 +33,7 @@ async fn main() -> Result<()> {
         tracing::info!("Detector mock receiver finished");
     });
 
-    let mut processor = MarketDataIngestorProcessor::new(config).await?;
+    let mut processor = MarketDataIngestorProcessor::new(config, Default::default()).await?;
     processor.set_update_sender(tx);
 
     // Run the processor and wait for it and the detector task to complete

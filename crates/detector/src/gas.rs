@@ -1,8 +1,8 @@
 //! Gas estimation and cost accounting for arbitrage opportunities.
 
+use crate::exchange_const::Exchange;
 use crate::prelude::*;
 use common::errors::CommonError;
-use dex_adapter_trait::Exchange;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 

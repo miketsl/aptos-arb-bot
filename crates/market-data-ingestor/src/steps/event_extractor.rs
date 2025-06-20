@@ -1,67 +1,34 @@
-use crate::types::DexConfig;
 use anyhow::Result;
 use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::{Event, Transaction};
+use config_lib::DexConfig;
+use std::collections::HashSet;
 use tracing::{info, trace};
 
 /// Step that filters transactions for relevant DEX events
 pub struct EventExtractorStep {
-    dex_configs: Vec<DexConfig>,
+    relevant_event_types: HashSet<String>,
 }
 
 impl EventExtractorStep {
     pub fn new(dex_configs: Vec<DexConfig>) -> Self {
-        Self { dex_configs }
+        let mut relevant_event_types = HashSet::new();
+        for dex in dex_configs {
+            for event_suffix in dex.events.values() {
+                let full_event_type = format!("{}{}", dex.module_address, event_suffix);
+                relevant_event_types.insert(full_event_type);
+            }
+        }
+        info!(
+            "EventExtractor initialized with event types: {:?}",
+            relevant_event_types
+        );
+        Self {
+            relevant_event_types,
+        }
     }
 
     fn is_relevant_event(&self, event: &Event) -> bool {
-        let type_str = &event.type_str;
-        let event_address = if let Some(key) = &event.key {
-            &key.account_address
-        } else {
-            return false;
-        };
-
-        trace!(
-            checking_event_type = type_str,
-            address = event_address,
-            "Checking event"
-        );
-
-        if let Some(dex) = self.dex_configs.iter().find(|dex| {
-            type_str == &dex.pool_snapshot_event_name || type_str == &dex.swap_event_name
-        }) {
-            // If a DEX is found, check if we need to filter by specific pools
-            if dex.pools.is_empty() {
-                info!(
-                    event_type = type_str,
-                    dex = dex.name,
-                    pool_address = event_address,
-                    "Found matching event (no pool filter)"
-                );
-                return true;
-            }
-
-            if dex.pools.contains(event_address) {
-                info!(
-                    event_type = type_str,
-                    dex = dex.name,
-                    pool_address = event_address,
-                    "Found matching event (pool filter passed)"
-                );
-                return true;
-            } else {
-                // This is the case we want to debug
-                trace!(
-                    event_type = type_str,
-                    dex = dex.name,
-                    event_address = event_address,
-                    configured_pools = ?dex.pools,
-                    "Event type matched but pool address did not"
-                );
-            }
-        }
-
-        false
+        self.relevant_event_types.contains(&event.type_str)
     }
 
     pub async fn process_transaction(&mut self, transaction: Transaction) -> Result<Vec<Event>> {
