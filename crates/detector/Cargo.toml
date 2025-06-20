@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 petgraph = "0.6"
 tokio = { version = "1", features = ["full"] }
+chrono = { version = "0.4", features = ["serde"] }
 common = { path = "../common" }
 aptos-sdk = { git = "https://github.com/aptos-labs/aptos-core", branch = "devnet" }
 rust_decimal = { version = "1.32", features = ["maths"] }
@@ -14,7 +15,6 @@ reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rand = "0.8"
-dex-adapter-trait = { version = "0.1.0", path = "../dex-adapter-trait" }
 anyhow = "1.0.86"
 futures = "0.3.30"
 log = "0.4.22"
@@ -24,9 +24,6 @@ async-trait = "0.1.80"
 default = []
 api = []
 
-[[test]]
-name = "e2e_mdi_detector"
-harness = false
 
 [dev-dependencies]
 tokio-stream = "0.1"

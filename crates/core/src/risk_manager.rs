@@ -2,7 +2,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use detector::traits::{ArbitrageOpportunity, IsRiskManager};
+use common::traits::IsRiskManager;
+use common::types::ArbitrageOpportunity;
 use rust_decimal::Decimal;
 
 /// A dummy risk manager that always approves trades.
@@ -37,18 +38,18 @@ impl Default for DummyRiskManager {
 impl IsRiskManager for DummyRiskManager {
     async fn assess_risk(&self, opportunity: &ArbitrageOpportunity) -> Result<bool> {
         // Simple risk assessment: approve if net profit exceeds threshold
-        let approved = opportunity.cycle_eval.net_profit >= self.min_net_profit;
+        let approved = opportunity.expected_profit >= self.min_net_profit;
 
         if approved {
             log::info!(
-                "Risk assessment APPROVED: net_profit = {} >= {}",
-                opportunity.cycle_eval.net_profit,
+                "Risk assessment APPROVED: expected_profit = {} >= {}",
+                opportunity.expected_profit,
                 self.min_net_profit
             );
         } else {
             log::warn!(
-                "Risk assessment REJECTED: net_profit = {} < {}",
-                opportunity.cycle_eval.net_profit,
+                "Risk assessment REJECTED: expected_profit = {} < {}",
+                opportunity.expected_profit,
                 self.min_net_profit
             );
         }
@@ -80,27 +81,32 @@ impl IsRiskManager for ConservativeRiskManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::types::{Asset, CycleEval, PathQuote, Quantity};
-    use detector::exchange_const::Exchange;
+    use common::types::Edge;
     use rust_decimal_macros::dec;
 
     fn create_test_opportunity(net_profit: Decimal) -> ArbitrageOpportunity {
+        use chrono::Utc;
+        use uuid::Uuid;
         ArbitrageOpportunity {
-            path_quote: PathQuote {
-                path: vec![
-                    (Asset::from("USDC"), Exchange::Tapp),
-                    (Asset::from("APT"), Exchange::Tapp),
-                ],
-                amount_in: Quantity(dec!(100)),
-                amount_out: Quantity(dec!(105)),
-                profit_pct: 0.05,
-            },
-            cycle_eval: CycleEval {
-                gross_profit: dec!(5),
-                gas_estimate: 1000,
-                gas_unit_price: dec!(0.001),
-                net_profit,
-            },
+            id: Uuid::new_v4(),
+            strategy: "test".to_string(),
+            path: vec![Edge {
+                from_token: "USDC".to_string(),
+                to_token: "APT".to_string(),
+                pool_address: "0x1".to_string(),
+                dex_name: "Tapp".to_string(),
+                liquidity: dec!(10000),
+                fee_bps: 30,
+                last_updated: Utc::now(),
+                last_opportunity: None,
+                opportunity_count: 0,
+                total_volume: dec!(0),
+            }],
+            expected_profit: net_profit,
+            input_amount: dec!(100),
+            gas_estimate: 1000,
+            block_number: 1,
+            timestamp: Utc::now(),
         }
     }
 

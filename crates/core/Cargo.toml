@@ -21,3 +21,5 @@ dex-adapter-trait = { path = "../dex-adapter-trait" }
 
 [dev-dependencies]
 tempfile = "3.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }

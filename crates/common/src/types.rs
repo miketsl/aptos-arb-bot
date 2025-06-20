@@ -305,3 +305,48 @@ pub use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::Event;
 pub use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::{
     transaction::TxnData, Transaction,
 };
+
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+/// Message types for block-aligned processing, sent from MDI to Detector.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DetectorMessage {
+    BlockStart {
+        block_number: u64,
+        timestamp: DateTime<Utc>,
+    },
+    MarketUpdate(MarketUpdate),
+    BlockEnd {
+        block_number: u64,
+    },
+}
+
+/// Internal edge representation within the Detector.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Edge {
+    pub from_token: String,
+    pub to_token: String,
+    pub pool_address: String,
+    pub dex_name: String,
+    pub liquidity: Decimal,
+    pub fee_bps: u32,
+    pub last_updated: DateTime<Utc>,
+    // Statistics for pruning
+    pub last_opportunity: Option<DateTime<Utc>>,
+    pub opportunity_count: u32,
+    pub total_volume: Decimal,
+}
+
+/// Output from Detector to Risk Manager.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArbitrageOpportunity {
+    pub id: Uuid,
+    pub strategy: String,
+    pub path: Vec<Edge>,
+    pub expected_profit: Decimal,
+    pub input_amount: Decimal,
+    pub gas_estimate: u64,
+    pub block_number: u64,
+    pub timestamp: DateTime<Utc>,
+}
