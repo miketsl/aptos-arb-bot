@@ -1,8 +1,6 @@
-use crate::{
-    config::IndexerProcessorConfig,
-    steps::{ClmmParserStep, DetectorPushStep, EventExtractorStep},
-    types::MarketUpdate,
-};
+use crate::config::IndexerProcessorConfig;
+use crate::steps::{ClmmParserStep, DetectorPushStep, EventExtractorStep};
+use crate::types::MarketUpdate;
 use anyhow::Result;
 use aptos_indexer_processor_sdk::aptos_indexer_transaction_stream::TransactionStream;
 use tokio::sync::{mpsc, oneshot};
