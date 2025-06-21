@@ -10,6 +10,7 @@ use std::{
 };
 use prost::Message;
 use bytes::Bytes;
+use serde::{Deserialize, Serialize};
 use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::Transaction as ProtoTransaction;
 /// Abstracts the source of transaction data, allowing for live or prerecorded streams.
 #[async_trait]
@@ -48,7 +49,8 @@ pub struct FileSource {
 }
 
 /// Protobuf message for recorded batches, matching the architecture spec.
-#[derive(prost::Message)]
+#[derive(prost::Message, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecordedBatch {
     #[prost(uint64, tag = "1")]
     pub start_version: u64,
