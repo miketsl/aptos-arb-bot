@@ -216,12 +216,6 @@ To achieve sub-100ms processing latency:
 3. Create `DexAdapterManager` for adapter registration and lookup
 4. Update configuration to support adapter-specific settings
 
-### Phase 2: Data Source Abstraction (Week 1)
-1. Create `DataSource` trait
-2. Implement `GrpcSource` (wrap existing TransactionStream)
-3. Implement `FileSource` for protobuf replay
-4. Add source selection to configuration
-
 ### Phase 3: Test Tooling (Week 2)
 1. Create `mdi-recorder` binary
 2. Implement protobuf serialization for recordings

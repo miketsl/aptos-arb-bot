@@ -2,7 +2,7 @@
 transaction_stream_config:
   starting_version: null
   indexer_grpc_data_service_address: "https://grpc.mainnet.aptoslabs.com:443"
-  auth_token: "your_token_here"
+  auth_token: "aptoslabs_Br2xqQ1m9MV_3aTvPFA7e94a3acFpprPHHXePH98LURdf"
   request_name_header: "market-data-ingestor"
 
 market_data_config:
@@ -47,3 +47,6 @@ market_data_config:
         swap: "::events::Swap"
         snapshot: "::events::PoolSnapshot"
       settings: {}
+
+detector_config:
+  strategies: []
