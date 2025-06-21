@@ -70,7 +70,7 @@ impl fmt::Display for AssetPair {
 }
 
 /// Represents a trading pair between two assets.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TradingPair {
     pub asset_x: Asset,
     pub asset_y: Asset,
@@ -322,13 +322,21 @@ pub enum DetectorMessage {
     },
 }
 
-/// Internal edge representation within the Detector.
+/// Defines the type of view a strategy requires on the price graph.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GraphView {
+    /// The strategy requires a view of the entire graph.
+    All,
+    /// The strategy requires a view of only the pools for a specific trading pair.
+    PairFiltered(TradingPair),
+}
+
+/// A serializable representation of an edge, suitable for sending to other services.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Edge {
-    pub from_token: String,
-    pub to_token: String,
+pub struct SerializableEdge {
+    pub pair: TradingPair,
+    pub exchange: String,
     pub pool_address: String,
-    pub dex_name: String,
     pub liquidity: Decimal,
     pub fee_bps: u32,
     pub last_updated: DateTime<Utc>,
@@ -343,10 +351,23 @@ pub struct Edge {
 pub struct ArbitrageOpportunity {
     pub id: Uuid,
     pub strategy: String,
-    pub path: Vec<Edge>,
+    pub path: Vec<SerializableEdge>,
     pub expected_profit: Decimal,
     pub input_amount: Decimal,
     pub gas_estimate: u64,
     pub block_number: u64,
     pub timestamp: DateTime<Utc>,
+}
+
+impl ArbitrageOpportunity {
+    pub fn hash(&self) -> [u8; 32] {
+        // Create a unique representation of the opportunity for deduplication.
+        // This should include the strategy and the path.
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(self.strategy.as_bytes());
+        for edge in &self.path {
+            hasher.update(edge.pool_address.as_bytes());
+        }
+        hasher.finalize().into()
+    }
 }

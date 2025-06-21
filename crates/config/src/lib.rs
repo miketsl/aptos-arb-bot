@@ -1,3 +1,4 @@
+use detector::strategies::StrategyConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -15,6 +16,12 @@ pub struct YamlTransactionStreamConfig {
 pub struct Config {
     pub transaction_stream_config: YamlTransactionStreamConfig,
     pub market_data_config: MarketDataConfig,
+    pub detector_config: DetectorConfig,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DetectorConfig {
+    pub strategies: Vec<StrategyConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

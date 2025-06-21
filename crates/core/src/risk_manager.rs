@@ -81,8 +81,10 @@ impl IsRiskManager for ConservativeRiskManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::types::Edge;
+    use common::types::{Asset, SerializableEdge, TradingPair};
+    use detector::exchange_const::Exchange;
     use rust_decimal_macros::dec;
+    use std::str::FromStr;
 
     fn create_test_opportunity(net_profit: Decimal) -> ArbitrageOpportunity {
         use chrono::Utc;
@@ -90,11 +92,13 @@ mod tests {
         ArbitrageOpportunity {
             id: Uuid::new_v4(),
             strategy: "test".to_string(),
-            path: vec![Edge {
-                from_token: "USDC".to_string(),
-                to_token: "APT".to_string(),
+            path: vec![SerializableEdge {
+                pair: TradingPair {
+                    asset_x: Asset::from_str("USDC").unwrap(),
+                    asset_y: Asset::from_str("APT").unwrap(),
+                },
+                exchange: Exchange::Tapp.to_string(),
                 pool_address: "0x1".to_string(),
-                dex_name: "Tapp".to_string(),
                 liquidity: dec!(10000),
                 fee_bps: 30,
                 last_updated: Utc::now(),

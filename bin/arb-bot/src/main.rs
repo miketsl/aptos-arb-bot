@@ -59,7 +59,11 @@ async fn main() -> Result<()> {
     let (opportunity_tx, mut opportunity_rx) = mpsc::channel(100);
 
     // --- Instantiate and Spawn Detector Service ---
-    let detector_service = DetectorService::new(detector_rx, opportunity_tx);
+    let detector_service = DetectorService::new(
+        detector_rx,
+        opportunity_tx,
+        config.detector_config.strategies,
+    )?;
     let detector_handle = tokio::spawn(async move { detector_service.run().await });
 
     // --- Instantiate and Spawn MDI ---

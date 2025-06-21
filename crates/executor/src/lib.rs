@@ -198,13 +198,13 @@ impl<E: Display + Clone + Send + Sync> IsExecutor for TradeExecutor<E> {
             let order = Order {
                 id: opportunity.id.to_string(),
                 pair: common::types::AssetPair::new(
-                    common::types::Asset(first_edge.from_token.clone()),
-                    common::types::Asset(first_edge.to_token.clone()),
+                    first_edge.pair.asset_x.clone(),
+                    first_edge.pair.asset_y.clone(),
                 ),
                 order_type: common::types::OrderType::Buy, // Placeholder
                 price: common::types::Price(opportunity.expected_profit), // Placeholder
                 quantity: common::types::Quantity(opportunity.input_amount),
-                exchange: first_edge.dex_name.clone(), // This is not generic, needs fixing
+                exchange: first_edge.exchange.to_string(), // This is not generic, needs fixing
             };
 
             // The execute_trade method in this file expects a generic E, but we have a String.
