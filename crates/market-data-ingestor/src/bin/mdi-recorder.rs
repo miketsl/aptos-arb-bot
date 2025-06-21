@@ -28,6 +28,10 @@ fn main() -> anyhow::Result<()> {
     // Use a tokio runtime for async operations
     let rt = Runtime::new()?;
     rt.block_on(async move {
+        // Initialize TLS crypto for gRPC
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .unwrap();
         // Load config and extract transaction stream settings
         let cfg = load_config_from_path(args.config_path.to_str().unwrap())
             .await?;
