@@ -70,7 +70,7 @@ impl fmt::Display for AssetPair {
 }
 
 /// Represents a trading pair between two assets.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TradingPair {
     pub asset_x: Asset,
     pub asset_y: Asset,
@@ -305,3 +305,69 @@ pub use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::Event;
 pub use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::{
     transaction::TxnData, Transaction,
 };
+
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+/// Message types for block-aligned processing, sent from MDI to Detector.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DetectorMessage {
+    BlockStart {
+        block_number: u64,
+        timestamp: DateTime<Utc>,
+    },
+    MarketUpdate(MarketUpdate),
+    BlockEnd {
+        block_number: u64,
+    },
+}
+
+/// Defines the type of view a strategy requires on the price graph.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GraphView {
+    /// The strategy requires a view of the entire graph.
+    All,
+    /// The strategy requires a view of only the pools for a specific trading pair.
+    PairFiltered(TradingPair),
+}
+
+/// A serializable representation of an edge, suitable for sending to other services.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializableEdge {
+    pub pair: TradingPair,
+    pub exchange: String,
+    pub pool_address: String,
+    pub liquidity: Decimal,
+    pub fee_bps: u32,
+    pub last_updated: DateTime<Utc>,
+    // Statistics for pruning
+    pub last_opportunity: Option<DateTime<Utc>>,
+    pub opportunity_count: u32,
+    pub total_volume: Decimal,
+}
+
+/// Output from Detector to Risk Manager.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArbitrageOpportunity {
+    pub id: Uuid,
+    pub strategy: String,
+    pub path: Vec<SerializableEdge>,
+    pub expected_profit: Decimal,
+    pub input_amount: Decimal,
+    pub gas_estimate: u64,
+    pub block_number: u64,
+    pub timestamp: DateTime<Utc>,
+}
+
+impl ArbitrageOpportunity {
+    pub fn hash(&self) -> [u8; 32] {
+        // Create a unique representation of the opportunity for deduplication.
+        // This should include the strategy and the path.
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(self.strategy.as_bytes());
+        for edge in &self.path {
+            hasher.update(edge.pool_address.as_bytes());
+        }
+        hasher.finalize().into()
+    }
+}

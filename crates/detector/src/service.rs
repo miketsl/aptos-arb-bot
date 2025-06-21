@@ -1,170 +1,133 @@
-use crate::bellman_ford::{DetectorConfig, NaiveDetector};
-use crate::exchange_const::Exchange;
-use crate::graph::{PriceGraph, PriceGraphImpl, PriceGraphSnapshot};
-use crate::prelude::*;
-use crate::traits::{IsExecutor, IsRiskManager};
-use crate::translator;
+use crate::{
+    deduplicator::OpportunityDeduplicator,
+    graph::PriceGraph,
+    strategies::{create_strategy, ArbitrageStrategy, StrategyConfig},
+    transform::transform_update,
+};
 use anyhow::Result;
-use common::types::MarketUpdate;
-use dex_adapter_trait::DexAdapter;
-use futures::stream::{Stream, StreamExt};
-use std::collections::HashMap;
-use std::pin::Pin;
+use common::types::{ArbitrageOpportunity, DetectorMessage};
+use futures::future::join_all;
+use log::{debug, info, warn};
 use std::sync::Arc;
-use tokio::sync::mpsc::Receiver;
-use tokio::sync::Mutex;
+use std::time::Duration;
+use tokio::sync::{broadcast, mpsc};
 
-/// A stream of market updates.
-pub type PriceStream = Pin<Box<dyn Stream<Item = MarketUpdate> + Send + Sync>>;
-
-/// A collection of DEX adapters, keyed by their exchange identifier.
-pub type DexAdapters = HashMap<Exchange, Arc<dyn DexAdapter>>;
-
-/// The internal service that manages the arbitrage detection process.
-/// This is not part of the public API.
-pub(crate) struct DetectorService {
-    /// The price graph used for arbitrage detection.
-    price_graph: Arc<Mutex<PriceGraphImpl>>,
-    /// The arbitrage detector.
-    detector: NaiveDetector,
-    /// A stream of price data.
-    price_stream: PriceStream,
-    /// Adapters for interacting with DEXs.
-    _dex_adapters: DexAdapters,
-    /// The risk manager.
-    risk_manager: Arc<dyn IsRiskManager>,
-    /// The executor.
-    executor: Arc<dyn IsExecutor>,
-    /// Receiver for shutdown signals.
-    shutdown_rx: Receiver<()>,
+/// The core service for the arbitrage detector.
+pub struct DetectorService {
+    /// Receives block-aligned messages from the MDI.
+    receiver: broadcast::Receiver<DetectorMessage>,
+    /// Sends found arbitrage opportunities to the risk manager.
+    opportunity_sender: mpsc::Sender<ArbitrageOpportunity>,
+    /// The price graph.
+    price_graph: PriceGraph,
+    /// The configured arbitrage strategies.
+    strategies: Vec<Box<dyn ArbitrageStrategy>>,
+    /// The opportunity deduplicator.
+    deduplicator: OpportunityDeduplicator,
 }
 
 impl DetectorService {
     /// Creates a new `DetectorService`.
-    pub(crate) fn new(
-        config: DetectorConfig,
-        price_stream: PriceStream,
-        dex_adapters: DexAdapters,
-        risk_manager: Arc<dyn IsRiskManager>,
-        executor: Arc<dyn IsExecutor>,
-        shutdown_rx: Receiver<()>,
-    ) -> Self {
-        Self {
-            price_graph: Arc::new(Mutex::new(PriceGraphImpl::new())),
-            detector: NaiveDetector::new(config),
-            price_stream,
-            _dex_adapters: dex_adapters,
-            risk_manager,
-            executor,
-            shutdown_rx,
-        }
+    pub fn new(
+        receiver: broadcast::Receiver<DetectorMessage>,
+        opportunity_sender: mpsc::Sender<ArbitrageOpportunity>,
+        strategy_configs: Vec<StrategyConfig>,
+    ) -> Result<Self> {
+        let strategies = strategy_configs
+            .iter()
+            .map(create_strategy)
+            .collect::<Result<Vec<_>>>()?;
+        info!("Loaded {} strategies", strategies.len());
+
+        Ok(Self {
+            receiver,
+            opportunity_sender,
+            price_graph: PriceGraph::new(),
+            strategies,
+            deduplicator: OpportunityDeduplicator::new(Duration::from_secs(1)),
+        })
     }
 
-    /// Starts the main detection loop.
-    pub(crate) async fn run(mut self) -> Result<PriceGraphImpl> {
+    /// Starts the main service loop.
+    pub async fn run(mut self) -> Result<()> {
+        info!("DetectorService started.");
         loop {
-            tokio::select! {
-                _ = self.shutdown_rx.recv() => {
-                    log::info!("DetectorService shutting down.");
-                    break;
-                }
-                maybe_update = self.price_stream.next() => {
-                    match maybe_update {
-                        Some(update) => {
-                            let mut graph = self.price_graph.lock().await;
-
-                            // Ingest the market update into the graph
-                            match translator::market_update_to_edge(&update) {
-                                Ok(edge) => {
-                                    graph.upsert_pool(edge);
-                                    log::debug!("Ingested market update for pool: {}", update.pool_address);
-                                }
-                                Err(e) => {
-                                    log::error!("Failed to translate market update to edge: {}", e);
-                                    continue;
-                                }
-                            }
-
-                            // Get oracle prices - for now, use mock prices based on common assets
-                            let oracle_prices = self.get_mock_oracle_prices();
-
-                            // Run detection
-                            match self.detector.detect_arbitrage(&graph.snapshot(), &oracle_prices).await {
-                                Ok(opportunities) => {
-                                    for opportunity in opportunities {
-                                        if self.risk_manager.assess_risk(&opportunity).await? {
-                                            self.executor.execute_trade(&opportunity).await?;
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("Error during arbitrage detection: {}", e);
-                                }
-                            }
-                        }
-                        None => {
-                            // Stream ended
-                            break;
-                        }
+            match self.receiver.recv().await {
+                Ok(message) => {
+                    if let Err(e) = self.handle_message(message).await {
+                        warn!("Error handling message: {}", e);
                     }
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    warn!("Detector channel lagged by {} messages.", n);
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    info!("Detector channel closed.");
+                    break;
                 }
             }
         }
-        // Return the final state of the graph
-        let graph = Arc::try_unwrap(self.price_graph)
-            .map_err(|_| anyhow::anyhow!("Failed to unwrap Arc for price_graph"))?
-            .into_inner();
-        Ok(graph)
-    }
-
-    /// Returns a snapshot of the current price graph.
-    pub(crate) async fn get_graph_snapshot(&self) -> PriceGraphSnapshot {
-        self.price_graph.lock().await.snapshot()
-    }
-
-    /// Ingests a tick into the price graph by creating or updating an edge.
-    #[allow(dead_code)]
-    async fn ingest_tick_to_graph(
-        &self,
-        graph: &mut PriceGraphImpl,
-        tick: &MarketTick,
-    ) -> Result<()> {
-        use crate::exchange_const::test_exchange;
-        use crate::graph::{Edge, PoolModel};
-        use common::types::Quantity;
-        use std::time::Instant;
-
-        // Create an edge from the tick data
-        let edge = Edge {
-            pair: tick.pair.clone(),
-            exchange: test_exchange(), // Use a test exchange for now
-            model: PoolModel::ConstantProduct {
-                reserve_x: Quantity(tick.price * rust_decimal::Decimal::new(10000, 0)), // Mock reserve calculation
-                reserve_y: Quantity(rust_decimal::Decimal::new(10000, 0)), // Mock reserve
-                fee_bps: 30,                                               // 0.3% fee
-            },
-            last_updated: Instant::now(),
-        };
-
-        // Upsert the edge into the graph
-        graph.upsert_pool(edge);
         Ok(())
     }
 
-    /// Gets mock oracle prices for common assets.
-    fn get_mock_oracle_prices(&self) -> HashMap<Asset, rust_decimal::Decimal> {
-        use rust_decimal_macros::dec;
+    /// Handles a single `DetectorMessage`.
+    async fn handle_message(&mut self, message: DetectorMessage) -> Result<()> {
+        match message {
+            DetectorMessage::BlockStart { .. } => {
+                // Not used in this phase
+            }
+            DetectorMessage::MarketUpdate(update) => {
+                debug!("Received MarketUpdate for pool: {}", update.pool_address);
+                match transform_update(update) {
+                    Ok(edge) => {
+                        self.price_graph.update_edge(edge);
+                    }
+                    Err(e) => {
+                        warn!("Failed to transform market update: {}", e);
+                    }
+                }
+            }
+            DetectorMessage::BlockEnd { block_number } => {
+                debug!("Received BlockEnd: block_number={}", block_number);
+                self.detect_all_strategies(block_number).await?;
+            }
+        }
+        Ok(())
+    }
 
-        let mut prices = HashMap::new();
+    /// Runs all configured strategies in parallel.
+    async fn detect_all_strategies(&mut self, block_number: u64) -> Result<()> {
+        let graph = Arc::new(self.price_graph.clone());
+        let mut tasks = vec![];
 
-        // Mock oracle prices in USD
-        prices.insert(Asset::from("USDC"), dec!(1.0));
-        prices.insert(Asset::from("USDT"), dec!(1.0));
-        prices.insert(Asset::from("APT"), dec!(8.0));
-        prices.insert(Asset::from("ETH"), dec!(2000.0));
-        prices.insert(Asset::from("BTC"), dec!(45000.0));
-        prices.insert(Asset::from("MOJO"), dec!(0.5));
+        for strategy in &self.strategies {
+            let strategy = strategy.clone_dyn();
+            let graph = Arc::clone(&graph);
+            let task = tokio::spawn(async move {
+                let view = graph.create_view(&strategy.required_graph_view());
+                strategy.detect_opportunities(&view, block_number).await
+            });
+            tasks.push(task);
+        }
 
-        prices
+        let results = join_all(tasks).await;
+
+        for result in results {
+            match result {
+                Ok(Ok(opportunities)) => {
+                    for opp in opportunities {
+                        if !self.deduplicator.is_duplicate(&opp) {
+                            if let Err(e) = self.opportunity_sender.send(opp).await {
+                                warn!("Failed to send opportunity: {}", e);
+                            }
+                        }
+                    }
+                }
+                Ok(Err(e)) => warn!("Strategy failed: {}", e),
+                Err(e) => warn!("Strategy task failed: {}", e),
+            }
+        }
+
+        Ok(())
     }
 }

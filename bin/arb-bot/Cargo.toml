@@ -16,6 +16,7 @@ tokio-stream = "0.1"
 anyhow = "1.0"
 clap = { version = "4.4", features = ["derive"] }
 rust_decimal = { version = "1.33", features = ["serde-with-str"] }
+chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rustls = "0.23.5"

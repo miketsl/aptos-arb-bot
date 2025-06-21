@@ -3,6 +3,8 @@
 //! This crate provides common data types, error definitions, and utility functions
 //! used across the `aptos-arb-bot` workspace.
 
+pub mod traits;
+
 /// Module for common error types.
 pub mod errors;
 
