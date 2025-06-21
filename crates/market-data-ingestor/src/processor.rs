@@ -1,5 +1,5 @@
 use crate::ingestor_config::IndexerProcessorConfig;
-use crate::steps::{DetectorPushStep, EventExtractorStep, Parser};
+use crate::steps::{DetectorPushStep, EventExtractorStep, FilterStep, Parser};
 use crate::types::MarketUpdate;
 use anyhow::Result;
 use dex_adapter_trait::DexAdapter;
@@ -13,6 +13,7 @@ use config_lib::DataSource as DataSourceConfig;
 pub struct MarketDataIngestorProcessor {
     config: IndexerProcessorConfig,
     parser: Parser,
+    filter_step: FilterStep,
     update_sender: Option<mpsc::Sender<MarketUpdate>>,
     shutdown_rx: Option<oneshot::Receiver<()>>,
 }
@@ -23,9 +24,11 @@ impl MarketDataIngestorProcessor {
         adapters: HashMap<String, Arc<dyn DexAdapter>>,
     ) -> Result<Self> {
         let parser = Parser::new(adapters);
+        let filter_step = FilterStep::new(&config.market_data_config.filters);
         Ok(Self {
             config,
             parser,
+            filter_step,
             update_sender: None,
             shutdown_rx: None,
         })
@@ -101,9 +104,13 @@ impl MarketDataIngestorProcessor {
                                         // Parse events into market updates
                                         match self.parser.process_events(&events) {
                                             Ok(updates) if !updates.is_empty() => {
-                                                // Push updates to detector
-                                                if let Err(e) = detector_push.push_updates(updates).await {
-                                                    error!(version = version, error = %e, "Failed to push updates");
+                                                // Apply filter step to the batch of market updates
+                                                let filtered = self.filter_step.filter(updates);
+                                                if !filtered.is_empty() {
+                                                    // Push updates to detector
+                                                    if let Err(e) = detector_push.push_updates(filtered).await {
+                                                        error!(version = version, error = %e, "Failed to push updates");
+                                                    }
                                                 }
                                             }
                                             Ok(_) => {} // No updates generated

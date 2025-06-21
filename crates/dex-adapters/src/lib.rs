@@ -85,7 +85,7 @@ impl DexAdapter for HyperionAdapter {
                     liquidity: snapshot.liquidity,
                     tick: snapshot.tick,
                     // Assuming fee_rate is in basis points, e.g., 30 for 0.30%
-                    fee_bps: (snapshot.fee_rate) as u32,
+                    fee_bps: snapshot.fee_rate as u32,
                     tick_map: snapshot.tick_map,
                 };
                 self.pools.insert(snapshot.pool_id, state);
@@ -164,7 +164,7 @@ impl DexAdapter for ThalaAdapter {
                     sqrt_price: snapshot.sqrt_price,
                     liquidity: snapshot.liquidity,
                     tick: snapshot.tick,
-                    fee_bps: (snapshot.fee_rate) as u32,
+                    fee_bps: snapshot.fee_rate as u32,
                     tick_map: snapshot.tick_map,
                 };
                 self.pools.insert(snapshot.pool_id, state);
