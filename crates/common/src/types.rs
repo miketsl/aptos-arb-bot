@@ -162,6 +162,7 @@ pub struct CycleEval {
     pub net_profit: rust_decimal::Decimal,
 }
 
+
 /// Token pair for CLMM pools
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct TokenPair {
@@ -199,6 +200,8 @@ mod tests {
         let price = Price(dec!(123.45));
         assert_eq!(format!("{}", price), "123.45");
     }
+
+    
 
     #[test]
     fn test_quantity_display() {

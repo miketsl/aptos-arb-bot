@@ -16,29 +16,45 @@ The ingestor uses a pipeline architecture:
 
 1. **Transaction Stream**: Connects to Aptos gRPC endpoint to receive transactions
 2. **Event Extraction**: Filters blockchain transactions for relevant DEX events
-3. **CLMM Parser**: Maintains pool state and parses events into market updates
-4. **Detector Push**: Sends updates to the detector via an in-memory channel
+3. **CLMM Parser**: Maintains pool state and parses events into `MarketUpdate`s
+4. **Filter Step**: Applies token/token-pairs filters to drop unwanted updates
+5. **Detector Push**: Sends filtered updates to the detector via an in-memory channel
 
 ## Configuration
 
-Configure DEXs in `config/default.yml`:
+Configure the data source, filters, and DEXs in `config/default.yml`:
 
 ```yaml
-market_data_ingestor:
-  processor_config:
-    type: market_data_ingestor
-  transaction_stream_config:
-    starting_version: null  # null means start from latest
-    grpc_data_stream_endpoint: "https://grpc.mainnet.aptoslabs.com:443"
-    grpc_auth_token: "YOUR_API_KEY_HERE"
-  market_data_config:
-    dexs:
-      - name: "Hyperion"
-        module_address: "0x..."
-        pool_snapshot_event_name: "0x...::pool::PoolSnapshot"
-        swap_event_name: "0x...::pool::SwapAfterEvent"
-        pools:
-          - "0xpool_address"
+transaction_stream_config:
+  starting_version: null  # null means start from latest
+  grpc_data_stream_endpoint: "https://grpc.mainnet.aptoslabs.com:443"
+  grpc_auth_token: "YOUR_API_KEY_HERE"
+
+market_data_config:
+  # Live gRPC or file replay source
+  data_source:
+    type: "grpc"  # or "file"
+    # file:
+    #   path: "./recordings/mainnet_2024_01.pb"
+    #   replay_speed: 1.0  # 1.0 = real-time, 0 = as fast as possible
+
+  # Pool filter modes: all pools, specific token, or specific token pairs
+  filters:
+    mode: "token_pairs"  # or "token" or "all"
+    token_pairs:
+      - ["APT", "USDC"]
+      - ["APT", "USDT"]
+    # OR for single token mode:
+    # token: "APT"
+
+  # DEX configurations with adapter settings (e.g., tick spacing)
+  dexs:
+    - name: "Hyperion"
+      module_address: "0x..."
+      pool_snapshot_event_name: "0x...::pool::PoolSnapshot"
+      swap_event_name: "0x...::pool::SwapAfterEvent"
+      settings:
+        tick_spacing_threshold: 10
 ```
 
 ## Integration
