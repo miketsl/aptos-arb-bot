@@ -79,7 +79,11 @@ impl DetectorService {
             }
             DetectorMessage::BlockEnd { block_number } => {
                 debug!("Received BlockEnd: block_number={}", block_number);
+                // Run all strategies for this block
                 self.detect_all_strategies(block_number).await?;
+                // Smart prune graph based on activity and TVL
+                let stats = self.price_graph.prune();
+                info!("Pruned {} edges, retained {}", stats.pruned, stats.retained);
             }
         }
         Ok(())
