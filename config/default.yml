@@ -47,3 +47,6 @@ market_data_config:
         swap: "::events::Swap"
         snapshot: "::events::PoolSnapshot"
       settings: {}
+
+detector_config:
+  strategies: []
