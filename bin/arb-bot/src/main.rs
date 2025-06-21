@@ -10,7 +10,7 @@ use market_data_ingestor::{IndexerProcessorConfig, MarketDataIngestorProcessor};
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
 /// Command line arguments for arb-bot.
@@ -53,8 +53,8 @@ async fn main() -> Result<()> {
         IndexerProcessorConfig::new(config.transaction_stream_config, config.market_data_config);
 
     // --- New Channel Setup ---
-    // Channel for MDI -> Detector communication
-    let (detector_tx, detector_rx) = broadcast::channel(100);
+    // Channel for MDI -> Detector communication (block messages + updates)
+    let (detector_tx, detector_rx) = mpsc::channel(100);
     // Channel for Detector -> Risk Manager communication
     let (opportunity_tx, mut opportunity_rx) = mpsc::channel(100);
 
@@ -68,12 +68,9 @@ async fn main() -> Result<()> {
 
     // --- Instantiate and Spawn MDI ---
     // The MDI needs a sender for the *broadcast* channel now.
-    let _mdi_sender = detector_tx.clone();
     let (mdi_shutdown_tx, mdi_shutdown_rx) = oneshot::channel();
     let mut mdi = MarketDataIngestorProcessor::new(mdi_config, adapters).await?;
-    // TODO: The MDI needs to be updated to send DetectorMessage enums instead of just MarketUpdates.
-    // For now, we will not connect it.
-    // mdi.set_update_sender(mdi_sender);
+    mdi.set_update_sender(detector_tx.clone());
     mdi.set_shutdown_receiver(mdi_shutdown_rx);
     let mdi_handle = tokio::spawn(async move { mdi.run_processor().await });
 
@@ -88,6 +85,7 @@ async fn main() -> Result<()> {
                     block_number,
                     timestamp: Utc::now(),
                 })
+                .await
                 .unwrap();
 
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -107,6 +105,7 @@ async fn main() -> Result<()> {
                     fee_bps: 0,
                     tick_map: HashMap::new(),
                 }))
+                .await
                 .unwrap();
 
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -114,6 +113,7 @@ async fn main() -> Result<()> {
             info!("Sending dummy BlockEnd for block {}", block_number);
             test_sender
                 .send(DetectorMessage::BlockEnd { block_number })
+                .await
                 .unwrap();
 
             block_number += 1;

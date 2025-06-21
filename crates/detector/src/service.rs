@@ -10,12 +10,12 @@ use futures::future::join_all;
 use log::{debug, info, warn};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 
 /// The core service for the arbitrage detector.
 pub struct DetectorService {
     /// Receives block-aligned messages from the MDI.
-    receiver: broadcast::Receiver<DetectorMessage>,
+    receiver: mpsc::Receiver<DetectorMessage>,
     /// Sends found arbitrage opportunities to the risk manager.
     opportunity_sender: mpsc::Sender<ArbitrageOpportunity>,
     /// The price graph.
@@ -29,7 +29,7 @@ pub struct DetectorService {
 impl DetectorService {
     /// Creates a new `DetectorService`.
     pub fn new(
-        receiver: broadcast::Receiver<DetectorMessage>,
+        receiver: mpsc::Receiver<DetectorMessage>,
         opportunity_sender: mpsc::Sender<ArbitrageOpportunity>,
         strategy_configs: Vec<StrategyConfig>,
     ) -> Result<Self> {
@@ -51,22 +51,12 @@ impl DetectorService {
     /// Starts the main service loop.
     pub async fn run(mut self) -> Result<()> {
         info!("DetectorService started.");
-        loop {
-            match self.receiver.recv().await {
-                Ok(message) => {
-                    if let Err(e) = self.handle_message(message).await {
-                        warn!("Error handling message: {}", e);
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    warn!("Detector channel lagged by {} messages.", n);
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    info!("Detector channel closed.");
-                    break;
-                }
+        while let Some(message) = self.receiver.recv().await {
+            if let Err(e) = self.handle_message(message).await {
+                warn!("Error handling message: {}", e);
             }
         }
+        info!("Detector channel closed.");
         Ok(())
     }
 

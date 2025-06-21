@@ -4,6 +4,7 @@ use common::types::{Event, MarketUpdate, TickInfo, TokenPair};
 use dashmap::DashMap;
 use dex_adapter_trait::DexAdapter;
 use serde::Deserialize;
+use simd_json::serde::from_slice as simd_from_slice;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -74,8 +75,10 @@ impl DexAdapter for HyperionAdapter {
 
         match event_name {
             "PoolSnapshot" => {
-                let snapshot: PoolSnapshotData = serde_json::from_str(&event.data)
-                    .context("Failed to deserialize PoolSnapshotData")?;
+                // Use simd-json for faster in-place JSON parsing
+                let mut raw = event.data.clone().into_bytes();
+                let snapshot: PoolSnapshotData = simd_from_slice(&mut raw)
+                    .context("Failed to deserialize PoolSnapshotData with simd-json")?;
                 let state = PoolState {
                     token_pair: TokenPair {
                         token0: snapshot.token_a,
@@ -85,7 +88,7 @@ impl DexAdapter for HyperionAdapter {
                     liquidity: snapshot.liquidity,
                     tick: snapshot.tick,
                     // Assuming fee_rate is in basis points, e.g., 30 for 0.30%
-                    fee_bps: (snapshot.fee_rate) as u32,
+                    fee_bps: snapshot.fee_rate as u32,
                     tick_map: snapshot.tick_map,
                 };
                 self.pools.insert(snapshot.pool_id, state);
@@ -93,8 +96,9 @@ impl DexAdapter for HyperionAdapter {
                 Ok(None)
             }
             "SwapEvent" | "SwapAfterEvent" => {
-                let swap: SwapEventData = serde_json::from_str(&event.data)
-                    .context("Failed to deserialize SwapEventData")?;
+                let mut raw = event.data.clone().into_bytes();
+                let swap: SwapEventData = simd_from_slice(&mut raw)
+                    .context("Failed to deserialize SwapEventData with simd-json")?;
                 let pool_id = swap.pool_id.clone();
 
                 if let Some(mut pool_state) = self.pools.get_mut(&pool_id) {
@@ -154,8 +158,9 @@ impl DexAdapter for ThalaAdapter {
 
         match event_name {
             "PoolSnapshot" => {
-                let snapshot: PoolSnapshotData = serde_json::from_str(&event.data)
-                    .context("Failed to deserialize PoolSnapshotData for Thala")?;
+                let mut raw = event.data.clone().into_bytes();
+                let snapshot: PoolSnapshotData = simd_from_slice(&mut raw)
+                    .context("Failed to deserialize PoolSnapshotData for Thala with simd-json")?;
                 let state = PoolState {
                     token_pair: TokenPair {
                         token0: snapshot.token_a,
@@ -164,15 +169,16 @@ impl DexAdapter for ThalaAdapter {
                     sqrt_price: snapshot.sqrt_price,
                     liquidity: snapshot.liquidity,
                     tick: snapshot.tick,
-                    fee_bps: (snapshot.fee_rate) as u32,
+                    fee_bps: snapshot.fee_rate as u32,
                     tick_map: snapshot.tick_map,
                 };
                 self.pools.insert(snapshot.pool_id, state);
                 Ok(None)
             }
             "SwapEvent" | "SwapAfterEvent" => {
-                let swap: SwapEventData = serde_json::from_str(&event.data)
-                    .context("Failed to deserialize SwapEventData for Thala")?;
+                let mut raw = event.data.clone().into_bytes();
+                let swap: SwapEventData = simd_from_slice(&mut raw)
+                    .context("Failed to deserialize SwapEventData for Thala with simd-json")?;
                 let pool_id = swap.pool_id.clone();
 
                 if let Some(mut pool_state) = self.pools.get_mut(&pool_id) {

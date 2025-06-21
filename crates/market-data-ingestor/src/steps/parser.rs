@@ -14,7 +14,7 @@ impl Parser {
     }
 
     pub fn process_events(&self, events: &[Event]) -> Result<Vec<MarketUpdate>> {
-        let mut updates = Vec::new();
+        let mut updates = Vec::with_capacity(events.len());
         for event in events {
             if let Some(adapter) = self.adapters.get(&event.type_str) {
                 if let Some(update) = adapter.parse_event(event)? {
