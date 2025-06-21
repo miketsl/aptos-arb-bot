@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use bytes::Buf;
+use std::path::PathBuf;
 
 use clap::Parser;
 use prost::Message;

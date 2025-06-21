@@ -1,6 +1,6 @@
-use config_lib::FilterConfig;
 use crate::types::MarketUpdate;
 use common::types::TokenPair;
+use config_lib::FilterConfig;
 
 /// Filter criteria for selecting which CLMM pools to ingest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,9 +19,9 @@ impl PoolFilter {
         match self {
             PoolFilter::All => true,
             PoolFilter::Token(tok) => &pair.token0 == tok || &pair.token1 == tok,
-            PoolFilter::TokenPairs(pairs) => pairs.iter().any(|(a, b)|
+            PoolFilter::TokenPairs(pairs) => pairs.iter().any(|(a, b)| {
                 (a == &pair.token0 && b == &pair.token1) || (a == &pair.token1 && b == &pair.token0)
-            ),
+            }),
         }
     }
 }
@@ -43,12 +43,9 @@ impl FilterStep {
         FilterStep { filter }
     }
 
-    /// Apply the filter to a batch of market updates, dropping non-matching pools.
-    pub fn filter(&self, updates: Vec<MarketUpdate>) -> Vec<MarketUpdate> {
-        updates
-            .into_iter()
-            .filter(|u| self.filter.matches(&u.token_pair))
-            .collect()
+    /// Retain only updates matching the configured token/pair filter.
+    pub fn apply(&self, updates: &mut Vec<MarketUpdate>) {
+        updates.retain(|u| self.filter.matches(&u.token_pair));
     }
 }
 
@@ -62,7 +59,10 @@ mod tests {
         MarketUpdate {
             pool_address: "p".to_string(),
             dex_name: "d".to_string(),
-            token_pair: TokenPair { token0: pair.0.to_string(), token1: pair.1.to_string() },
+            token_pair: TokenPair {
+                token0: pair.0.to_string(),
+                token1: pair.1.to_string(),
+            },
             sqrt_price: 0,
             liquidity: 0,
             tick: 0,
@@ -73,33 +73,48 @@ mod tests {
 
     #[test]
     fn test_filter_step_token_pairs() {
-        let cfg = FilterConfig::TokenPairs { token_pairs: vec![("A".into(), "B".into())] };
+        let cfg = FilterConfig::TokenPairs {
+            token_pairs: vec![("A".into(), "B".into())],
+        };
         let step = FilterStep::new(&cfg);
-        let updates = vec![mk_update(("A","B")), mk_update(("B","C"))];
-        let out = step.filter(updates);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].token_pair, TokenPair { token0: "A".into(), token1: "B".into() });
+        let mut updates = vec![mk_update(("A", "B")), mk_update(("B", "C"))];
+        step.apply(&mut updates);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(
+            updates[0].token_pair,
+            TokenPair {
+                token0: "A".into(),
+                token1: "B".into()
+            }
+        );
     }
 
     #[test]
     fn test_filter_step_token_all() {
         let cfg = FilterConfig::All;
         let step = FilterStep::new(&cfg);
-        let updates = vec![mk_update(("X","Y")), mk_update(("Y","Z"))];
-        let out = step.filter(updates.clone());
+        let mut updates = vec![mk_update(("X", "Y")), mk_update(("Y", "Z"))];
+        let orig = updates.clone();
+        step.apply(&mut updates);
         // All updates should pass filter
-        assert_eq!(out.len(), updates.len());
-        assert_eq!(out[0].token_pair, updates[0].token_pair);
-        assert_eq!(out[1].token_pair, updates[1].token_pair);
+        assert_eq!(updates.len(), orig.len());
+        assert_eq!(updates[0].token_pair, orig[0].token_pair);
+        assert_eq!(updates[1].token_pair, orig[1].token_pair);
     }
 
     #[test]
     fn test_filter_step_token_single() {
         let cfg = FilterConfig::Token { token: "X".into() };
         let step = FilterStep::new(&cfg);
-        let updates = vec![mk_update(("X","Y")), mk_update(("A","B"))];
-        let out = step.filter(updates);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].token_pair, TokenPair { token0: "X".into(), token1: "Y".into() });
+        let mut updates = vec![mk_update(("X", "Y")), mk_update(("A", "B"))];
+        step.apply(&mut updates);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(
+            updates[0].token_pair,
+            TokenPair {
+                token0: "X".into(),
+                token1: "Y".into()
+            }
+        );
     }
 }

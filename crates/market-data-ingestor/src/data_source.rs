@@ -1,17 +1,17 @@
-use async_trait::async_trait;
 use anyhow::Result;
 use aptos_indexer_processor_sdk::aptos_indexer_transaction_stream::{
     TransactionStream, TransactionStreamConfig, TransactionsPBResponse,
 };
+use async_trait::async_trait;
 
+use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::Transaction as ProtoTransaction;
+use bytes::Bytes;
+use prost::Message;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     time::{Duration, Instant},
 };
-use prost::Message;
-use bytes::Bytes;
-use serde::{Deserialize, Serialize};
-use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::Transaction as ProtoTransaction;
 /// Abstracts the source of transaction data, allowing for live or prerecorded streams.
 #[async_trait]
 pub trait DataSource: Send {

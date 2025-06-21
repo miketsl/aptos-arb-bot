@@ -3,8 +3,8 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 use aptos_indexer_processor_sdk::aptos_indexer_transaction_stream::TransactionStream;
-use config_lib::load_config_from_path;
 use clap::Parser;
+use config_lib::load_config_from_path;
 use prost::Message;
 use tokio::runtime::Runtime;
 
@@ -33,8 +33,7 @@ fn main() -> anyhow::Result<()> {
             .install_default()
             .unwrap();
         // Load config and extract transaction stream settings
-        let cfg = load_config_from_path(args.config_path.to_str().unwrap())
-            .await?;
+        let cfg = load_config_from_path(args.config_path.to_str().unwrap()).await?;
         let indexer_cfg = IndexerProcessorConfig::new(
             cfg.transaction_stream_config.clone(),
             cfg.market_data_config.clone(),

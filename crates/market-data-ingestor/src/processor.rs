@@ -1,14 +1,14 @@
+use crate::data_source::{DataSource as SourceTrait, FileSource, GrpcSource};
 use crate::ingestor_config::IndexerProcessorConfig;
 use crate::steps::{DetectorPushStep, EventExtractorStep, FilterStep, Parser};
 use crate::types::MarketUpdate;
 use anyhow::Result;
+use config_lib::DataSource as DataSourceConfig;
 use dex_adapter_trait::DexAdapter;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
-use crate::data_source::{DataSource as SourceTrait, FileSource, GrpcSource};
-use config_lib::DataSource as DataSourceConfig;
 
 pub struct MarketDataIngestorProcessor {
     config: IndexerProcessorConfig,
@@ -62,11 +62,12 @@ impl MarketDataIngestorProcessor {
 
         // Select data source (gRPC live stream or file replay) from config
         let mut source: Box<dyn SourceTrait> = match &self.config.market_data_config.data_source {
-            DataSourceConfig::Grpc => Box::new(
-                GrpcSource::new(self.config.transaction_stream_config.clone()).await?,
-            ),
-            DataSourceConfig::File { path, replay_speed } =>
-                Box::new(FileSource::new(path.clone(), *replay_speed)?),
+            DataSourceConfig::Grpc => {
+                Box::new(GrpcSource::new(self.config.transaction_stream_config.clone()).await?)
+            }
+            DataSourceConfig::File { path, replay_speed } => {
+                Box::new(FileSource::new(path.clone(), *replay_speed)?)
+            }
         };
 
         // Create processing steps
@@ -103,12 +104,12 @@ impl MarketDataIngestorProcessor {
                                     Ok(events) if !events.is_empty() => {
                                         // Parse events into market updates
                                         match self.parser.process_events(&events) {
-                                            Ok(updates) if !updates.is_empty() => {
-                                                // Apply filter step to the batch of market updates
-                                                let filtered = self.filter_step.filter(updates);
-                                                if !filtered.is_empty() {
+                                            Ok(mut updates) if !updates.is_empty() => {
+                                                // Filter in-place to drop unwanted pools
+                                                self.filter_step.apply(&mut updates);
+                                                if !updates.is_empty() {
                                                     // Push updates to detector
-                                                    if let Err(e) = detector_push.push_updates(filtered).await {
+                                                    if let Err(e) = detector_push.push_updates(updates).await {
                                                         error!(version = version, error = %e, "Failed to push updates");
                                                     }
                                                 }

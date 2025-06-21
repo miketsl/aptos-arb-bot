@@ -11,11 +11,15 @@ pub struct EventExtractorStep {
 
 impl EventExtractorStep {
     pub fn new(dex_configs: Vec<DexConfig>) -> Self {
-        let mut relevant_event_types = HashSet::new();
+        // Pre-allocate and build full event-type keys once to avoid repeated re-allocations
+        let total = dex_configs.iter().map(|d| d.events.len()).sum();
+        let mut relevant_event_types = HashSet::with_capacity(total);
         for dex in dex_configs {
             for event_suffix in dex.events.values() {
-                let full_event_type = format!("{}{}", dex.module_address, event_suffix);
-                relevant_event_types.insert(full_event_type);
+                let mut key = String::with_capacity(dex.module_address.len() + event_suffix.len());
+                key.push_str(&dex.module_address);
+                key.push_str(event_suffix);
+                relevant_event_types.insert(key);
             }
         }
         info!(
