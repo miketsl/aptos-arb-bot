@@ -8,10 +8,12 @@ transaction_stream_config:
 market_data_config:
   # Data source configuration
   data_source:
-    type: "grpc"  # or "file"
-    file:
-      path: "./recordings/mainnet_2024_01.pb"
-      replay_speed: 1.0  # 1.0 = real-time, 0 = as fast as possible
+    type: "grpc"
+    # For file-based replay (RecordedBatch protobuf), uncomment below and adjust path/speed:
+    # type: "file"
+    # file:
+    #   path: "./recordings/mainnet_2024_01.pb"
+    #   replay_speed: 1.0  # 1.0 = real-time, 0 = as fast as possible
   
   # Filter configuration
   filters:
