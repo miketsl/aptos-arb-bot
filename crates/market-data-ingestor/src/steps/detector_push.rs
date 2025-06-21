@@ -1,32 +1,26 @@
-use super::super::types::MarketUpdate;
 use anyhow::Result;
+use common::types::DetectorMessage;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
 
-/// Step that pushes market updates to the detector via a channel
+/// Step that pushes detector messages (BlockStart/MarketUpdate/BlockEnd).
 pub struct DetectorPushStep {
-    sender: mpsc::Sender<MarketUpdate>,
+    sender: mpsc::Sender<DetectorMessage>,
 }
 
 impl DetectorPushStep {
-    pub fn new(sender: mpsc::Sender<MarketUpdate>) -> Self {
+    pub fn new(sender: mpsc::Sender<DetectorMessage>) -> Self {
         Self { sender }
     }
 
-    pub async fn push_updates(&self, updates: Vec<MarketUpdate>) -> Result<()> {
-        for update in updates {
-            debug!(
-                pool = update.pool_address,
-                dex = update.dex_name,
-                "Pushing market update to detector"
-            );
+    /// Send a single detector message to the receiver.
+    pub async fn push(&self, msg: DetectorMessage) -> Result<()> {
+        debug!(?msg, "Pushing detector message");
 
-            if let Err(e) = self.sender.send(update).await {
-                error!(error = %e, "Failed to send update to detector");
-                return Err(anyhow::anyhow!("Channel send failed: {}", e));
-            }
+        if let Err(e) = self.sender.send(msg).await {
+            error!(error = %e, "Failed to send detector message");
+            return Err(anyhow::anyhow!("Channel send failed: {}", e));
         }
-
         Ok(())
     }
 }

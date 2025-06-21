@@ -1,8 +1,9 @@
 use crate::data_source::{DataSource as SourceTrait, FileSource, GrpcSource};
 use crate::ingestor_config::IndexerProcessorConfig;
 use crate::steps::{DetectorPushStep, EventExtractorStep, FilterStep, Parser};
-use crate::types::MarketUpdate;
 use anyhow::Result;
+use chrono::Utc;
+use common::types::DetectorMessage;
 use config_lib::DataSource as DataSourceConfig;
 use dex_adapter_trait::DexAdapter;
 use std::collections::HashMap;
@@ -14,7 +15,7 @@ pub struct MarketDataIngestorProcessor {
     config: IndexerProcessorConfig,
     parser: Parser,
     filter_step: FilterStep,
-    update_sender: Option<mpsc::Sender<MarketUpdate>>,
+    update_sender: Option<mpsc::Sender<DetectorMessage>>,
     shutdown_rx: Option<oneshot::Receiver<()>>,
 }
 
@@ -35,7 +36,8 @@ impl MarketDataIngestorProcessor {
     }
 
     /// Set the channel sender for pushing updates to the detector
-    pub fn set_update_sender(&mut self, sender: mpsc::Sender<MarketUpdate>) {
+    /// Set the channel sender for pushing detector messages (BlockStart/Updates/BlockEnd)
+    pub fn set_update_sender(&mut self, sender: mpsc::Sender<DetectorMessage>) {
         self.update_sender = Some(sender);
     }
 
@@ -96,6 +98,12 @@ impl MarketDataIngestorProcessor {
                                 num_transactions = response.transactions.len(),
                                 "Received transaction batch"
                             );
+
+                            // Emit BlockStart before processing this block
+                            detector_push.push(DetectorMessage::BlockStart {
+                                block_number: response.start_version,
+                                timestamp: Utc::now(),
+                            }).await?;
                             for transaction in response.transactions {
                                 let version = transaction.version;
 
@@ -109,8 +117,10 @@ impl MarketDataIngestorProcessor {
                                                 self.filter_step.apply(&mut updates);
                                                 if !updates.is_empty() {
                                                     // Push updates to detector
-                                                    if let Err(e) = detector_push.push_updates(updates).await {
-                                                        error!(version = version, error = %e, "Failed to push updates");
+                                                    for update in updates {
+                                                        if let Err(e) = detector_push.push(DetectorMessage::MarketUpdate(update)).await {
+                                                            error!(version = version, error = %e, "Failed to send MarketUpdate message");
+                                                        }
                                                     }
                                                 }
                                             }
@@ -126,6 +136,8 @@ impl MarketDataIngestorProcessor {
                                     }
                                 }
                             }
+                            // Emit BlockEnd after processing this block
+                            detector_push.push(DetectorMessage::BlockEnd { block_number: response.end_version }).await?;
                         }
                         Err(e) => {
                             error!(error = %e, "Error receiving transaction batch");
