@@ -2,12 +2,13 @@ use crate::ingestor_config::IndexerProcessorConfig;
 use crate::steps::{DetectorPushStep, EventExtractorStep, Parser};
 use crate::types::MarketUpdate;
 use anyhow::Result;
-use aptos_indexer_processor_sdk::aptos_indexer_transaction_stream::TransactionStream;
 use dex_adapter_trait::DexAdapter;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
+use crate::data_source::{DataSource as SourceTrait, FileSource, GrpcSource};
+use config_lib::DataSource as DataSourceConfig;
 
 pub struct MarketDataIngestorProcessor {
     config: IndexerProcessorConfig,
@@ -56,8 +57,14 @@ impl MarketDataIngestorProcessor {
         let starting_version = self.config.transaction_stream_config.starting_version;
         info!(starting_version = ?starting_version, "Starting from version");
 
-        let mut transaction_stream =
-            TransactionStream::new(self.config.transaction_stream_config.clone()).await?;
+        // Select data source (gRPC live stream or file replay) from config
+        let mut source: Box<dyn SourceTrait> = match &self.config.market_data_config.data_source {
+            DataSourceConfig::Grpc => Box::new(
+                GrpcSource::new(self.config.transaction_stream_config.clone()).await?,
+            ),
+            DataSourceConfig::File { path, replay_speed } =>
+                Box::new(FileSource::new(path.clone(), *replay_speed)?),
+        };
 
         // Create processing steps
         let mut event_extractor =
@@ -76,7 +83,7 @@ impl MarketDataIngestorProcessor {
                     break;
                 }
 
-                batch_result = transaction_stream.get_next_transaction_batch() => {
+                batch_result = source.get_next_batch() => {
                     match batch_result {
                         Ok(response) => {
                             info!(

@@ -5,3 +5,4 @@ pub mod types;
 
 pub use ingestor_config::IndexerProcessorConfig;
 pub use processor::MarketDataIngestorProcessor;
+pub mod data_source;

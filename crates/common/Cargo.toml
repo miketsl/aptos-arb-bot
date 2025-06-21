@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+
 thiserror = "1.0"
 rust_decimal = { version = "1.33", features = ["macros", "serde-with-str"] }
 rust_decimal_macros = "1.33"
@@ -12,6 +13,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1.80"
 blake3 = "1.5"
+anyhow = "1.0"
 
 # Aptos SDK - direct git dependency, features enabled here.
 aptos-sdk = { git = "https://github.com/aptos-labs/aptos-core", branch = "devnet" }
@@ -24,7 +26,6 @@ bigdecimal = "0.4"
 # Optional dependencies for Aptos testing utilities (excluding aptos-sdk as it's now direct)
 testcontainers = { version = "0.20", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
-anyhow = { version = "1.0", optional = true }
 url = { version = "2.3", optional = true }
 rand = { version = "0.7", optional = true } # Downgraded for rand_core 0.5.x compatibility
 rand_core = { version = "0.5.1", optional = true } # Explicitly for aptos-sdk compatibility
@@ -36,7 +37,6 @@ aptos-tests = [
     "dep:testcontainers",
     # aptos-sdk is now a direct dependency, no need for "dep:aptos-sdk"
     "dep:tokio",
-    "dep:anyhow",
     "dep:url",
     "dep:rand",
     "dep:rand_core"

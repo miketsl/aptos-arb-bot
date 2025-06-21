@@ -40,5 +40,9 @@ yoke = "0.8.0"
 futures = "0.3.31"
 rustls = "0.23.28"
 
+# Protobuf replay support
+prost = "0.13"
+bytes = "1.4"
+
 [dev-dependencies]
 mockall = "0.12"
