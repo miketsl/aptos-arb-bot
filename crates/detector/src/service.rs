@@ -95,26 +95,13 @@ impl DetectorService {
         let mut tasks = Vec::with_capacity(self.strategies.len());
 
         for strategy in &self.strategies {
-            let name = strategy.name();
-            let req_view = strategy.required_graph_view();
-            // Incremental: cross-DEX strategy runs per updated pair
-            if name == "cross_dex_arbitrage" {
-                for pair in &self.updated_pairs {
-                    let strat = strategy.clone_dyn();
-                    let graph = Arc::clone(&graph);
-                    let pair = pair.clone();
-                    let task = tokio::spawn(async move {
-                        let view = graph.create_view(&GraphView::PairFiltered(pair));
-                        strat.detect_opportunities(&view, block_number).await
-                    });
-                    tasks.push(task);
-                }
-            } else {
+            let views = strategy.incremental_views(&self.updated_pairs);
+            for view in views {
                 let strat = strategy.clone_dyn();
                 let graph = Arc::clone(&graph);
                 let task = tokio::spawn(async move {
-                    let view = graph.create_view(&req_view);
-                    strat.detect_opportunities(&view, block_number).await
+                    let pv = graph.create_view(&view);
+                    strat.detect_opportunities(&pv, block_number).await
                 });
                 tasks.push(task);
             }

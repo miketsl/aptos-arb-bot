@@ -48,6 +48,15 @@ pub trait ArbitrageStrategy: Send + Sync {
         block_number: u64,
     ) -> Result<Vec<ArbitrageOpportunity>>;
     fn clone_dyn(&self) -> Box<dyn ArbitrageStrategy>;
+
+    /// Returns the graph views to run on this strategy, given the set of updated pairs.
+    /// By default, strategies run on their `required_graph_view()` only once per block.
+    fn incremental_views(
+        &self,
+        _updated: &std::collections::HashSet<common::types::TradingPair>,
+    ) -> Vec<GraphView> {
+        vec![self.required_graph_view()]
+    }
 }
 
 impl Clone for Box<dyn ArbitrageStrategy> {
