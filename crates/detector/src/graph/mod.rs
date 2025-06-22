@@ -1,4 +1,3 @@
-use crate::exchange_const::Exchange;
 use common::types::{Asset, Quantity, TradingPair};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
@@ -55,7 +54,7 @@ pub struct Tick {
 #[derive(Debug, Clone)]
 pub struct Edge {
     pub pair: TradingPair, // Defines direction: asset_x -> asset_y
-    pub exchange: Exchange,
+    pub exchange: String,
     pub pool_address: String,
     pub model: PoolModel,
     pub last_updated: Instant,
@@ -76,7 +75,7 @@ impl Edge {
     pub fn to_serializable(&self) -> common::types::SerializableEdge {
         common::types::SerializableEdge {
             pair: self.pair.clone(),
-            exchange: self.exchange.to_string(),
+            exchange: self.exchange.clone(),
             pool_address: self.pool_address.clone(),
             liquidity: Default::default(), // Placeholder
             fee_bps: self.model.fee_bps() as u32,
@@ -190,7 +189,7 @@ impl Edge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::exchange_const::Exchange;
+    // use crate::exchange_const::Exchange; // no longer needed; use string identifiers
     use common::types::{Asset, Quantity, TradingPair};
     use rust_decimal_macros::dec;
     use std::str::FromStr;
@@ -217,7 +216,7 @@ mod tests {
                 asset_x: asset_x.clone(),
                 asset_y: asset_y.clone(),
             },
-            exchange: Exchange::Tapp, // Placeholder
+            exchange: "tapp".to_string(), // Placeholder
             pool_address: "0x1".to_string(),
             model: PoolModel::ConstantProduct {
                 reserve_x: Quantity(reserve_x_val),
@@ -379,7 +378,7 @@ mod tests {
 
         let cl_edge = Edge {
             pair: TradingPair::new(asset_a.clone(), asset_b.clone()),
-            exchange: Exchange::Tapp, // Placeholder
+            exchange: "tapp".to_string(), // Placeholder
             pool_address: "0x2".to_string(),
             model: PoolModel::ConcentratedLiquidity {
                 ticks: forward_ticks.clone(),

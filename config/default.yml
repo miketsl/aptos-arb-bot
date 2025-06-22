@@ -25,7 +25,7 @@ market_data_config:
     # token: "APT"
   
   # DEX configurations with adapter settings
-  dexs:
+  dexs: 
     - name: "Hyperion"
       module_address: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039"
       events:

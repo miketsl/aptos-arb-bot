@@ -324,11 +324,14 @@ pub enum DetectorMessage {
 
 /// Defines the type of view a strategy requires on the price graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum GraphView {
     /// The strategy requires a view of the entire graph.
     All,
     /// The strategy requires a view of only the pools for a specific trading pair.
     PairFiltered(TradingPair),
+    /// The strategy requires a view filtered to a specific DEX identifier.
+    DexFiltered(String),
 }
 
 /// A serializable representation of an edge, suitable for sending to other services.

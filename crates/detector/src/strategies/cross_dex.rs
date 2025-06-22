@@ -132,4 +132,16 @@ impl ArbitrageStrategy for CrossDexArbitrage {
     fn clone_dyn(&self) -> Box<dyn ArbitrageStrategy> {
         Box::new(self.clone())
     }
+
+    fn incremental_views(
+        &self,
+        updated: &std::collections::HashSet<common::types::TradingPair>,
+    ) -> Vec<GraphView> {
+        // Only run cross-DEX on pairs that had updates in this block
+        updated
+            .iter()
+            .cloned()
+            .map(GraphView::PairFiltered)
+            .collect()
+    }
 }

@@ -1,8 +1,5 @@
-use crate::{
-    exchange_const::Exchange,
-    graph::{Edge, PoolModel, Tick},
-};
-use anyhow::{anyhow, Result};
+use crate::graph::{Edge, PoolModel, Tick};
+use anyhow::Result;
 use common::types::{Asset, MarketUpdate, Quantity, TradingPair};
 use rust_decimal::Decimal;
 use std::{str::FromStr, time::Instant};
@@ -48,8 +45,7 @@ pub fn transform_update(update: MarketUpdate) -> Result<Edge> {
 
     Ok(Edge {
         pair: TradingPair::new(asset_x, asset_y),
-        exchange: Exchange::from_str(&update.dex_name)
-            .map_err(|_| anyhow!("Unknown exchange: {}", update.dex_name))?,
+        exchange: update.dex_name,
         pool_address: update.pool_address,
         model,
         last_updated: Instant::now(),

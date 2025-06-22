@@ -5,11 +5,13 @@
 //! the system via channels.
 
 pub mod deduplicator;
-pub mod exchange_const;
 pub mod graph;
 pub mod service;
 pub mod strategies;
 pub mod transform;
+
+pub mod error;
+mod metrics;
 
 // Re-export the main service struct for easy access.
 pub use service::DetectorService;

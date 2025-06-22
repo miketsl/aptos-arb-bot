@@ -1,3 +1,5 @@
+use crate::error::DetectorError;
+use crate::metrics::DetectorMetrics;
 use crate::{
     deduplicator::OpportunityDeduplicator,
     graph::PriceGraph,
@@ -5,9 +7,11 @@ use crate::{
     transform::transform_update,
 };
 use anyhow::Result;
-use common::types::{ArbitrageOpportunity, DetectorMessage};
+use common::types::{ArbitrageOpportunity, DetectorMessage, GraphView, TradingPair};
 use futures::future::join_all;
-use log::{debug, info, warn};
+use futures::FutureExt;
+use log::{debug, error, info, warn};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -18,12 +22,16 @@ pub struct DetectorService {
     receiver: mpsc::Receiver<DetectorMessage>,
     /// Sends found arbitrage opportunities to the risk manager.
     opportunity_sender: mpsc::Sender<ArbitrageOpportunity>,
-    /// The price graph.
-    price_graph: PriceGraph,
+    /// The price graph (shared pointer for cheap cloning).
+    price_graph: Arc<PriceGraph>,
     /// The configured arbitrage strategies.
     strategies: Vec<Box<dyn ArbitrageStrategy>>,
     /// The opportunity deduplicator.
     deduplicator: OpportunityDeduplicator,
+    /// Tracks trading pairs updated during the current block.
+    updated_pairs: HashSet<TradingPair>,
+    /// Metrics for error handling and observability.
+    metrics: DetectorMetrics,
 }
 
 impl DetectorService {
@@ -42,9 +50,11 @@ impl DetectorService {
         Ok(Self {
             receiver,
             opportunity_sender,
-            price_graph: PriceGraph::new(),
+            price_graph: Arc::new(PriceGraph::new()),
             strategies,
             deduplicator: OpportunityDeduplicator::new(Duration::from_secs(1)),
+            updated_pairs: HashSet::new(),
+            metrics: DetectorMetrics::new(),
         })
     }
 
@@ -52,8 +62,13 @@ impl DetectorService {
     pub async fn run(mut self) -> Result<()> {
         info!("DetectorService started.");
         while let Some(message) = self.receiver.recv().await {
-            if let Err(e) = self.handle_message(message).await {
-                warn!("Error handling message: {}", e);
+            let outcome = std::panic::AssertUnwindSafe(self.handle_message(message))
+                .catch_unwind()
+                .await;
+            match outcome {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => warn!("Error handling message: {}", e),
+                Err(_) => warn!("Panic while handling message"),
             }
         }
         info!("Detector channel closed.");
@@ -64,22 +79,34 @@ impl DetectorService {
     async fn handle_message(&mut self, message: DetectorMessage) -> Result<()> {
         match message {
             DetectorMessage::BlockStart { .. } => {
-                // Not used in this phase
+                self.updated_pairs.clear();
             }
             DetectorMessage::MarketUpdate(update) => {
                 debug!("Received MarketUpdate for pool: {}", update.pool_address);
-                match transform_update(update) {
+                match transform_update(update.clone()) {
                     Ok(edge) => {
-                        self.price_graph.update_edge(edge);
+                        self.updated_pairs.insert(edge.pair.clone());
+                        Arc::make_mut(&mut self.price_graph).update_edge(edge);
                     }
                     Err(e) => {
-                        warn!("Failed to transform market update: {}", e);
+                        self.handle_error(DetectorError::TransformError(e.to_string()))
+                            .await;
                     }
                 }
             }
             DetectorMessage::BlockEnd { block_number } => {
                 debug!("Received BlockEnd: block_number={}", block_number);
-                self.detect_all_strategies(block_number).await?;
+                // Run all strategies for this block
+                if let Err(e) = self.detect_all_strategies(block_number).await {
+                    self.handle_error(DetectorError::StrategyFailed(
+                        "detect_all_strategies".to_string(),
+                        e.to_string(),
+                    ))
+                    .await;
+                }
+                // Smart prune graph based on activity and TVL
+                let stats = Arc::make_mut(&mut self.price_graph).prune();
+                info!("Pruned {} edges, retained {}", stats.pruned, stats.retained);
             }
         }
         Ok(())
@@ -87,37 +114,79 @@ impl DetectorService {
 
     /// Runs all configured strategies in parallel.
     async fn detect_all_strategies(&mut self, block_number: u64) -> Result<()> {
-        let graph = Arc::new(self.price_graph.clone());
-        let mut tasks = vec![];
+        let graph = Arc::clone(&self.price_graph);
+        let mut tasks = Vec::with_capacity(self.strategies.len());
 
         for strategy in &self.strategies {
-            let strategy = strategy.clone_dyn();
-            let graph = Arc::clone(&graph);
-            let task = tokio::spawn(async move {
-                let view = graph.create_view(&strategy.required_graph_view());
-                strategy.detect_opportunities(&view, block_number).await
-            });
-            tasks.push(task);
+            let views = strategy.incremental_views(&self.updated_pairs);
+            for view in views {
+                let strat = strategy.clone_dyn();
+                let strat_name = strat.name().to_string();
+                let graph = Arc::clone(&graph);
+                let task = tokio::spawn(async move {
+                    let pv = graph.create_view(&view);
+                    let result = strat.detect_opportunities(&pv, block_number).await;
+                    (strat_name, result)
+                });
+                tasks.push(task);
+            }
         }
 
         let results = join_all(tasks).await;
 
         for result in results {
             match result {
-                Ok(Ok(opportunities)) => {
+                Ok((name, Ok(opportunities))) => {
                     for opp in opportunities {
                         if !self.deduplicator.is_duplicate(&opp) {
-                            if let Err(e) = self.opportunity_sender.send(opp).await {
-                                warn!("Failed to send opportunity: {}", e);
+                            if let Err(_e) = self.opportunity_sender.send(opp).await {
+                                self.handle_error(DetectorError::ChannelClosed).await;
                             }
                         }
                     }
                 }
-                Ok(Err(e)) => warn!("Strategy failed: {}", e),
-                Err(e) => warn!("Strategy task failed: {}", e),
+                Ok((name, Err(e))) => {
+                    self.handle_error(DetectorError::StrategyFailed(name.clone(), e.to_string()))
+                        .await;
+                }
+                Err(e) => {
+                    self.handle_error(DetectorError::StrategyFailed(
+                        "spawn".to_string(),
+                        e.to_string(),
+                    ))
+                    .await;
+                }
             }
         }
 
         Ok(())
+    }
+
+    async fn handle_error(&mut self, error: DetectorError) {
+        match error {
+            DetectorError::DisconnectedComponent(component_id) => {
+                warn!("Disconnected component detected: {:?}", component_id);
+                self.metrics.disconnected_components.inc();
+            }
+            DetectorError::GraphCorruption => {
+                error!("Graph corruption detected, rebuilding...");
+                self.rebuild_graph_from_cache().await;
+            }
+            DetectorError::StrategyFailed(name, err) => {
+                warn!("Strategy {} failed: {}", name, err);
+                self.metrics
+                    .strategy_failures
+                    .with_label_values(&[&name])
+                    .inc();
+            }
+            _ => {
+                error!("Detector error: {:?}", error);
+            }
+        }
+    }
+
+    async fn rebuild_graph_from_cache(&mut self) {
+        // Placeholder: reset the graph. Real implementation should replay cached updates.
+        self.price_graph = Arc::new(PriceGraph::new());
     }
 }
