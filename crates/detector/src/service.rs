@@ -92,7 +92,7 @@ impl DetectorService {
     /// Runs all configured strategies in parallel.
     async fn detect_all_strategies(&mut self, block_number: u64) -> Result<()> {
         let graph = Arc::new(self.price_graph.clone());
-        let mut tasks = vec![];
+        let mut tasks = Vec::with_capacity(self.strategies.len());
 
         for strategy in &self.strategies {
             let strategy = strategy.clone_dyn();
