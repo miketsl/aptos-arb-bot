@@ -75,6 +75,18 @@ impl PriceGraph {
                     asset_mapping: &self.asset_mapping,
                 }
             }
+            GraphView::DexFiltered(dex) => {
+                let mut sub = DiGraphMap::new();
+                for (source, target, edge) in self.graph.all_edges() {
+                    if &edge.exchange == dex {
+                        sub.add_edge(source, target, edge.clone());
+                    }
+                }
+                PriceGraphView {
+                    graph: Cow::Owned(sub),
+                    asset_mapping: &self.asset_mapping,
+                }
+            }
         }
     }
 
