@@ -93,4 +93,17 @@ impl ArbitrageStrategy for TriangularArbitrage {
     fn clone_dyn(&self) -> Box<dyn ArbitrageStrategy> {
         Box::new(self.clone())
     }
+
+    fn incremental_views(
+        &self,
+        updated: &std::collections::HashSet<common::types::TradingPair>,
+    ) -> Vec<GraphView> {
+        if let Some(target) = &self.config.target_dex {
+            vec![GraphView::DexFiltered(target.clone())]
+        } else if !updated.is_empty() {
+            vec![self.required_graph_view()]
+        } else {
+            vec![]
+        }
+    }
 }
