@@ -7,7 +7,7 @@ use crate::{
     transform::transform_update,
 };
 use anyhow::Result;
-use common::types::{ArbitrageOpportunity, DetectorMessage, GraphView, TradingPair};
+use common::types::{ArbitrageOpportunity, DetectorMessage, TradingPair};
 use futures::future::join_all;
 use futures::FutureExt;
 use log::{debug, error, info, warn};
@@ -136,7 +136,7 @@ impl DetectorService {
 
         for result in results {
             match result {
-                Ok((name, Ok(opportunities))) => {
+                Ok((_name, Ok(opportunities))) => {
                     for opp in opportunities {
                         if !self.deduplicator.is_duplicate(&opp) {
                             if let Err(_e) = self.opportunity_sender.send(opp).await {
@@ -196,7 +196,7 @@ mod service_tests {
     use super::*;
     use crate::error::DetectorError;
     use crate::graph::{Edge, PoolModel, PriceGraph};
-    use common::types::{Asset, Quantity, TradingPair};
+    use common::types::{Asset, GraphView, Quantity, TradingPair};
     use rust_decimal_macros::dec;
     use std::str::FromStr;
     use std::time::{Duration, Instant};

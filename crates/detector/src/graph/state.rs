@@ -218,8 +218,7 @@ pub struct PruneStats {
 mod prune_tests {
     use super::*;
     use crate::graph::{Edge, PoolModel};
-    use common::types::{Asset, Quantity, TradingPair};
-    use rust_decimal::Decimal;
+    use common::types::{Asset, Quantity};
     use rust_decimal_macros::dec;
     use std::str::FromStr;
     use std::time::{Duration, Instant};

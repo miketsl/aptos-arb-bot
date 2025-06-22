@@ -39,7 +39,7 @@ impl OpportunityDeduplicator {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use common::types::{ArbitrageOpportunity, SerializableEdge};
+    use common::types::ArbitrageOpportunity;
     use rust_decimal_macros::dec;
     use std::{thread, time::Duration};
     use uuid::Uuid;
