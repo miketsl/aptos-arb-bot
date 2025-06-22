@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use futures::FutureExt;
 
 /// The core service for the arbitrage detector.
 pub struct DetectorService {
