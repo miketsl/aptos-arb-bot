@@ -75,7 +75,6 @@ impl PriceGraph {
     }
 
     /// Removes edges that have not been updated within the given duration.
-    /// TODO: Extend this to prune based on other metrics like low TVL, etc.
     pub fn prune_stale(&mut self, max_age: Duration) {
         let now = Instant::now();
         let stale_edges: Vec<(AssetId, AssetId)> = self

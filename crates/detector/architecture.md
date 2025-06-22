@@ -663,7 +663,7 @@ impl DetectorService {
 ## Implementation Phases
 
 ### Phase 1: Core Refactoring (Week 1)
-1. Create/update `common-types` with shared data structures
+1. Create/update `common::types` with shared data structures
 2. Remove risk manager and executor dependencies
 3. Implement channel-based communication
 4. Basic transform layer (MarketUpdate → Edge)

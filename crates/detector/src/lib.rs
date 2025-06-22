@@ -5,7 +5,6 @@
 //! the system via channels.
 
 pub mod deduplicator;
-pub mod exchange_const;
 pub mod graph;
 pub mod service;
 pub mod strategies;

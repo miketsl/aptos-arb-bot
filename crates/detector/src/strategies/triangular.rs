@@ -2,7 +2,11 @@ use super::{ArbitrageStrategy, TriangularConfig};
 use crate::graph::PriceGraphView;
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::Utc;
+use common::types::Quantity;
 use common::types::{ArbitrageOpportunity, GraphView};
+use rust_decimal::Decimal;
+use uuid::Uuid;
 
 /// Strategy for 3-node (triangular) arbitrage paths.
 #[derive(Clone)]
@@ -32,8 +36,58 @@ impl ArbitrageStrategy for TriangularArbitrage {
         graph: &PriceGraphView,
         block_number: u64,
     ) -> Result<Vec<ArbitrageOpportunity>> {
-        // TODO: Implement triangular arbitrage detection.
-        Ok(Vec::new())
+        let mut opportunities = Vec::new();
+        let one = Quantity(Decimal::ONE);
+        for a in graph.graph.nodes() {
+            for b in graph.graph.neighbors(a) {
+                for c in graph.graph.neighbors(b) {
+                    // must form a cycle back to a
+                    if c == a || !graph.graph.contains_edge(c, a) {
+                        continue;
+                    }
+                    // fetch the three edges
+                    let e_ab = graph.graph.edge_weight(a, b).unwrap();
+                    let e_bc = graph.graph.edge_weight(b, c).unwrap();
+                    let e_ca = graph.graph.edge_weight(c, a).unwrap();
+                    // apply optional target-dex filter
+                    if let Some(target) = &self.config.target_dex {
+                        if ![&e_ab.exchange, &e_bc.exchange, &e_ca.exchange]
+                            .iter()
+                            .map(|ex| ex.to_string())
+                            .any(|e| &e == target)
+                        {
+                            continue;
+                        }
+                    }
+                    // simulate trades: A->B, B->C, C->A
+                    if let Some(out_ab) = e_ab.quote(&one, &graph.asset_mapping[&a]) {
+                        if let Some(out_bc) = e_bc.quote(&out_ab, &graph.asset_mapping[&b]) {
+                            if let Some(out_ca) = e_ca.quote(&out_bc, &graph.asset_mapping[&c]) {
+                                let profit = out_ca.0 - one.0;
+                                if profit > Decimal::ZERO {
+                                    let path = vec![
+                                        e_ab.to_serializable(),
+                                        e_bc.to_serializable(),
+                                        e_ca.to_serializable(),
+                                    ];
+                                    opportunities.push(ArbitrageOpportunity {
+                                        id: Uuid::new_v4(),
+                                        strategy: self.name().to_string(),
+                                        path,
+                                        expected_profit: profit,
+                                        input_amount: one.0,
+                                        gas_estimate: 0,
+                                        block_number,
+                                        timestamp: Utc::now(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(opportunities)
     }
 
     fn clone_dyn(&self) -> Box<dyn ArbitrageStrategy> {

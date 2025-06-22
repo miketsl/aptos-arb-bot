@@ -1,8 +1,12 @@
 use super::{ArbitrageStrategy, MultiHopConfig};
-use crate::graph::PriceGraphView;
+use crate::graph::{AssetId, Edge, PriceGraphView};
 use anyhow::Result;
 use async_trait::async_trait;
-use common::types::{ArbitrageOpportunity, GraphView};
+use chrono::Utc;
+use common::types::{ArbitrageOpportunity, GraphView, Quantity};
+use rust_decimal::Decimal;
+use std::collections::HashSet;
+use uuid::Uuid;
 
 /// Strategy for multi-hop arbitrage paths.
 #[derive(Clone)]
@@ -32,8 +36,98 @@ impl ArbitrageStrategy for MultiHopArbitrage {
         graph: &PriceGraphView,
         block_number: u64,
     ) -> Result<Vec<ArbitrageOpportunity>> {
-        // TODO: Implement multi-hop arbitrage detection.
-        Ok(Vec::new())
+        let mut opportunities = Vec::new();
+        let one = Quantity(Decimal::ONE);
+        let max_hops = self.config.max_hops;
+        let enable_cross_dex = self.config.enable_cross_dex;
+        for start in graph.graph.nodes() {
+            fn dfs<'a>(
+                start: AssetId,
+                current: AssetId,
+                graph: &'a PriceGraphView,
+                visited: &mut HashSet<AssetId>,
+                path: &mut Vec<&'a Edge>,
+                one: Quantity,
+                max_hops: usize,
+                enable_cross_dex: bool,
+                opportunities: &mut Vec<ArbitrageOpportunity>,
+                block_number: u64,
+            ) {
+                if path.len() > 0 && current == start {
+                    let mut amount = one;
+                    for edge in path.iter() {
+                        if let Some(out) = edge.quote(&amount, &edge.pair.asset_x) {
+                            amount = out;
+                        } else {
+                            return;
+                        }
+                    }
+                    let profit = amount.0 - one.0;
+                    if profit > Decimal::ZERO {
+                        let path_serialized = path.iter().map(|e| e.to_serializable()).collect();
+                        opportunities.push(ArbitrageOpportunity {
+                            id: Uuid::new_v4(),
+                            strategy: "multi_hop_arbitrage".to_string(),
+                            path: path_serialized,
+                            expected_profit: profit,
+                            input_amount: one.0,
+                            gas_estimate: 0,
+                            block_number,
+                            timestamp: Utc::now(),
+                        });
+                    }
+                    return;
+                }
+                if path.len() >= max_hops {
+                    return;
+                }
+                for neighbor in graph.graph.neighbors(current) {
+                    if neighbor != start && visited.contains(&neighbor) {
+                        continue;
+                    }
+                    let edge = graph.graph.edge_weight(current, neighbor).unwrap();
+                    if !enable_cross_dex {
+                        if let Some(first_edge) = path.first() {
+                            if edge.exchange != first_edge.exchange {
+                                continue;
+                            }
+                        }
+                    }
+                    visited.insert(neighbor);
+                    path.push(edge);
+                    dfs(
+                        start,
+                        neighbor,
+                        graph,
+                        visited,
+                        path,
+                        one,
+                        max_hops,
+                        enable_cross_dex,
+                        opportunities,
+                        block_number,
+                    );
+                    path.pop();
+                    visited.remove(&neighbor);
+                }
+            }
+            let mut visited = HashSet::new();
+            visited.insert(start);
+            let mut path = Vec::new();
+            dfs(
+                start,
+                start,
+                graph,
+                &mut visited,
+                &mut path,
+                one,
+                max_hops,
+                enable_cross_dex,
+                &mut opportunities,
+                block_number,
+            );
+        }
+        Ok(opportunities)
     }
 
     fn clone_dyn(&self) -> Box<dyn ArbitrageStrategy> {
