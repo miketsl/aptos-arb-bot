@@ -18,8 +18,8 @@ pub struct DetectorService {
     receiver: mpsc::Receiver<DetectorMessage>,
     /// Sends found arbitrage opportunities to the risk manager.
     opportunity_sender: mpsc::Sender<ArbitrageOpportunity>,
-    /// The price graph.
-    price_graph: PriceGraph,
+    /// The price graph (shared pointer for cheap cloning).
+    price_graph: Arc<PriceGraph>,
     /// The configured arbitrage strategies.
     strategies: Vec<Box<dyn ArbitrageStrategy>>,
     /// The opportunity deduplicator.
@@ -42,7 +42,7 @@ impl DetectorService {
         Ok(Self {
             receiver,
             opportunity_sender,
-            price_graph: PriceGraph::new(),
+            price_graph: Arc::new(PriceGraph::new()),
             strategies,
             deduplicator: OpportunityDeduplicator::new(Duration::from_secs(1)),
         })
@@ -70,7 +70,7 @@ impl DetectorService {
                 debug!("Received MarketUpdate for pool: {}", update.pool_address);
                 match transform_update(update) {
                     Ok(edge) => {
-                        self.price_graph.update_edge(edge);
+                        Arc::make_mut(&mut self.price_graph).update_edge(edge);
                     }
                     Err(e) => {
                         warn!("Failed to transform market update: {}", e);
@@ -82,7 +82,7 @@ impl DetectorService {
                 // Run all strategies for this block
                 self.detect_all_strategies(block_number).await?;
                 // Smart prune graph based on activity and TVL
-                let stats = self.price_graph.prune();
+                let stats = Arc::make_mut(&mut self.price_graph).prune();
                 info!("Pruned {} edges, retained {}", stats.pruned, stats.retained);
             }
         }
@@ -91,7 +91,7 @@ impl DetectorService {
 
     /// Runs all configured strategies in parallel.
     async fn detect_all_strategies(&mut self, block_number: u64) -> Result<()> {
-        let graph = Arc::new(self.price_graph.clone());
+        let graph = Arc::clone(&self.price_graph);
         let mut tasks = Vec::with_capacity(self.strategies.len());
 
         for strategy in &self.strategies {
