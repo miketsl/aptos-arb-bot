@@ -40,6 +40,10 @@ impl ArbitrageStrategy for MultiHopArbitrage {
         let one = Quantity(Decimal::ONE);
         let max_hops = self.config.max_hops;
         let enable_cross_dex = self.config.enable_cross_dex;
+
+        let mut visited = HashSet::with_capacity(max_hops * 2);
+        let mut path = Vec::with_capacity(max_hops);
+
         for start in graph.graph.nodes() {
             fn dfs<'a>(
                 start: AssetId,
@@ -111,9 +115,9 @@ impl ArbitrageStrategy for MultiHopArbitrage {
                     visited.remove(&neighbor);
                 }
             }
-            let mut visited = HashSet::new();
+            visited.clear();
+            path.clear();
             visited.insert(start);
-            let mut path = Vec::new();
             dfs(
                 start,
                 start,
