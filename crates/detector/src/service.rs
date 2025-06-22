@@ -5,7 +5,7 @@ use crate::{
     transform::transform_update,
 };
 use anyhow::Result;
-use common::types::{ArbitrageOpportunity, DetectorMessage, TradingPair};
+use common::types::{ArbitrageOpportunity, DetectorMessage, GraphView, TradingPair};
 use futures::future::join_all;
 use log::{debug, info, warn};
 use std::collections::HashSet;
@@ -95,13 +95,29 @@ impl DetectorService {
         let mut tasks = Vec::with_capacity(self.strategies.len());
 
         for strategy in &self.strategies {
-            let strategy = strategy.clone_dyn();
-            let graph = Arc::clone(&graph);
-            let task = tokio::spawn(async move {
-                let view = graph.create_view(&strategy.required_graph_view());
-                strategy.detect_opportunities(&view, block_number).await
-            });
-            tasks.push(task);
+            let name = strategy.name();
+            let req_view = strategy.required_graph_view();
+            // Incremental: cross-DEX strategy runs per updated pair
+            if name == "cross_dex_arbitrage" {
+                for pair in &self.updated_pairs {
+                    let strat = strategy.clone_dyn();
+                    let graph = Arc::clone(&graph);
+                    let pair = pair.clone();
+                    let task = tokio::spawn(async move {
+                        let view = graph.create_view(&GraphView::PairFiltered(pair));
+                        strat.detect_opportunities(&view, block_number).await
+                    });
+                    tasks.push(task);
+                }
+            } else {
+                let strat = strategy.clone_dyn();
+                let graph = Arc::clone(&graph);
+                let task = tokio::spawn(async move {
+                    let view = graph.create_view(&req_view);
+                    strat.detect_opportunities(&view, block_number).await
+                });
+                tasks.push(task);
+            }
         }
 
         let results = join_all(tasks).await;
