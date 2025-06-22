@@ -10,5 +10,8 @@ pub mod service;
 pub mod strategies;
 pub mod transform;
 
+pub mod error;
+mod metrics;
+
 // Re-export the main service struct for easy access.
 pub use service::DetectorService;
