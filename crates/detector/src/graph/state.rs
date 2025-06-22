@@ -2,14 +2,15 @@ use crate::graph::{AssetId, Edge};
 use common::types::{Asset, GraphView};
 use petgraph::graphmap::DiGraphMap;
 use rust_decimal::Decimal;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// A view into the price graph, tailored to the needs of a specific strategy.
 #[derive(Debug)]
 pub struct PriceGraphView<'a> {
-    /// The underlying graph data.
-    pub graph: &'a DiGraphMap<AssetId, Edge>,
+    /// The underlying graph data or a filtered subgraph.
+    pub graph: Cow<'a, DiGraphMap<AssetId, Edge>>,
     /// A map from asset IDs to asset definitions.
     pub asset_mapping: &'a HashMap<AssetId, Asset>,
 }
@@ -59,15 +60,18 @@ impl PriceGraph {
     pub fn create_view(&self, view: &GraphView) -> PriceGraphView {
         match view {
             GraphView::All => PriceGraphView {
-                graph: &self.graph,
+                graph: Cow::Borrowed(&self.graph),
                 asset_mapping: &self.asset_mapping,
             },
             GraphView::PairFiltered(pair) => {
-                // For now, we return the full graph and let the strategy filter.
-                // In the future, we could create a subgraph here for efficiency.
-                let _pair = pair;
+                let mut sub = DiGraphMap::new();
+                for (source, target, edge) in self.graph.all_edges() {
+                    if edge.pair.asset_x == pair.asset_x && edge.pair.asset_y == pair.asset_y {
+                        sub.add_edge(source, target, edge.clone());
+                    }
+                }
                 PriceGraphView {
-                    graph: &self.graph,
+                    graph: Cow::Owned(sub),
                     asset_mapping: &self.asset_mapping,
                 }
             }
