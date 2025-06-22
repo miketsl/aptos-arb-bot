@@ -5,9 +5,10 @@ use crate::{
     transform::transform_update,
 };
 use anyhow::Result;
-use common::types::{ArbitrageOpportunity, DetectorMessage};
+use common::types::{ArbitrageOpportunity, DetectorMessage, TradingPair};
 use futures::future::join_all;
 use log::{debug, info, warn};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -24,6 +25,8 @@ pub struct DetectorService {
     strategies: Vec<Box<dyn ArbitrageStrategy>>,
     /// The opportunity deduplicator.
     deduplicator: OpportunityDeduplicator,
+    /// Tracks trading pairs updated during the current block.
+    updated_pairs: HashSet<TradingPair>,
 }
 
 impl DetectorService {
@@ -45,6 +48,7 @@ impl DetectorService {
             price_graph: Arc::new(PriceGraph::new()),
             strategies,
             deduplicator: OpportunityDeduplicator::new(Duration::from_secs(1)),
+            updated_pairs: HashSet::new(),
         })
     }
 
@@ -64,17 +68,13 @@ impl DetectorService {
     async fn handle_message(&mut self, message: DetectorMessage) -> Result<()> {
         match message {
             DetectorMessage::BlockStart { .. } => {
-                // Not used in this phase
+                self.updated_pairs.clear();
             }
             DetectorMessage::MarketUpdate(update) => {
                 debug!("Received MarketUpdate for pool: {}", update.pool_address);
-                match transform_update(update) {
-                    Ok(edge) => {
-                        Arc::make_mut(&mut self.price_graph).update_edge(edge);
-                    }
-                    Err(e) => {
-                        warn!("Failed to transform market update: {}", e);
-                    }
+                if let Ok(edge) = transform_update(update) {
+                    self.updated_pairs.insert(edge.pair.clone());
+                    Arc::make_mut(&mut self.price_graph).update_edge(edge);
                 }
             }
             DetectorMessage::BlockEnd { block_number } => {
