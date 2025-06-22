@@ -36,8 +36,9 @@ impl ArbitrageStrategy for TriangularArbitrage {
         graph: &PriceGraphView,
         block_number: u64,
     ) -> Result<Vec<ArbitrageOpportunity>> {
-        let mut opportunities = Vec::new();
+        let mut opportunities = Vec::with_capacity(graph.graph.edge_count());
         let one = Quantity(Decimal::ONE);
+        let mut path_buf = Vec::with_capacity(3);
         for a in graph.graph.nodes() {
             for b in graph.graph.neighbors(a) {
                 for c in graph.graph.neighbors(b) {
@@ -65,15 +66,14 @@ impl ArbitrageStrategy for TriangularArbitrage {
                             if let Some(out_ca) = e_ca.quote(&out_bc, &graph.asset_mapping[&c]) {
                                 let profit = out_ca.0 - one.0;
                                 if profit > Decimal::ZERO {
-                                    let path = vec![
-                                        e_ab.to_serializable(),
-                                        e_bc.to_serializable(),
-                                        e_ca.to_serializable(),
-                                    ];
+                                    path_buf.clear();
+                                    path_buf.push(e_ab.to_serializable());
+                                    path_buf.push(e_bc.to_serializable());
+                                    path_buf.push(e_ca.to_serializable());
                                     opportunities.push(ArbitrageOpportunity {
                                         id: Uuid::new_v4(),
                                         strategy: self.name().to_string(),
-                                        path,
+                                        path: path_buf.clone(),
                                         expected_profit: profit,
                                         input_amount: one.0,
                                         gas_estimate: 0,
