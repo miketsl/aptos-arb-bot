@@ -79,7 +79,7 @@ fn reserves_from_liquidity_and_sqrt_price(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::types::{MarketUpdate, TokenPair, TickInfo, Quantity};
+    use common::types::{MarketUpdate, Quantity, TickInfo, TokenPair};
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
     use std::collections::HashMap;
@@ -89,7 +89,10 @@ mod tests {
         MarketUpdate {
             pool_address: "0xPOOL".to_string(),
             dex_name: "DEX".to_string(),
-            token_pair: TokenPair { token0: "0xA".to_string(), token1: "0xB".to_string() },
+            token_pair: TokenPair {
+                token0: "0xA".to_string(),
+                token1: "0xB".to_string(),
+            },
             sqrt_price: 1u128 << 64,
             liquidity: 1_000_000u128,
             tick: 0,
@@ -104,7 +107,11 @@ mod tests {
         let edge = transform_update(update).expect("transform failed");
         // ConstantProduct branch: reserves should equal 1 after scaling
         match edge.model {
-            PoolModel::ConstantProduct { reserve_x, reserve_y, fee_bps } => {
+            PoolModel::ConstantProduct {
+                reserve_x,
+                reserve_y,
+                fee_bps,
+            } => {
                 assert_eq!(reserve_x, Quantity(dec!(1)));
                 assert_eq!(reserve_y, Quantity(dec!(1)));
                 assert_eq!(fee_bps, 30);
@@ -123,7 +130,13 @@ mod tests {
         let mut update = basic_update();
         // Add one tick entry to trigger CLMM branch
         let mut ticks = HashMap::new();
-        ticks.insert(2, TickInfo { liquidity_net: 0, liquidity_gross: 5u128 });
+        ticks.insert(
+            2,
+            TickInfo {
+                liquidity_net: 0,
+                liquidity_gross: 5u128,
+            },
+        );
         update.tick_map = ticks;
         let edge = transform_update(update).expect("transform failed");
         match edge.model {

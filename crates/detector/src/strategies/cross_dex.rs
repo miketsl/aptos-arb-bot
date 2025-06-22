@@ -145,3 +145,62 @@ impl ArbitrageStrategy for CrossDexArbitrage {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{Edge, PoolModel, PriceGraph};
+    use common::types::{GraphView, Quantity, TradingPair};
+    use rust_decimal_macros::dec;
+    use std::{str::FromStr, time::Instant};
+
+    #[tokio::test]
+    async fn test_cross_dex_detects_arbitrage() {
+        let mut graph = PriceGraph::new();
+        let asset_x = common::types::Asset::from_str("A").unwrap();
+        let asset_y = common::types::Asset::from_str("B").unwrap();
+        // Two pools with different reserves => different prices
+        let edge1 = Edge {
+            pair: TradingPair::new(asset_x.clone(), asset_y.clone()),
+            exchange: "X".to_string(),
+            pool_address: "p1".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(2)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        let edge2 = Edge {
+            pair: TradingPair::new(asset_x.clone(), asset_y.clone()),
+            exchange: "Y".to_string(),
+            pool_address: "p2".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(3)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        graph.update_edge(edge1.clone());
+        graph.update_edge(edge2.clone());
+        // Also add reverse edges for the same pools
+        // Add a reverse edge with favorable price for selling
+        let rev = Edge {
+            pair: TradingPair::new(asset_y.clone(), asset_x.clone()),
+            exchange: "X".to_string(),
+            pool_address: "p1_rev".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(10)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        graph.update_edge(rev);
+        let view = graph.create_view(&GraphView::All);
+        let strat = CrossDexArbitrage::new(CrossDexConfig::default());
+        let opps = strat.detect_opportunities(&view, 0).await.unwrap();
+        assert!(!opps.is_empty(), "expected cross-dex opportunity");
+    }
+}

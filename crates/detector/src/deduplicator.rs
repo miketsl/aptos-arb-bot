@@ -34,3 +34,39 @@ impl OpportunityDeduplicator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use common::types::{ArbitrageOpportunity, SerializableEdge};
+    use rust_decimal_macros::dec;
+    use std::{thread, time::Duration};
+    use uuid::Uuid;
+
+    fn make_opportunity() -> ArbitrageOpportunity {
+        ArbitrageOpportunity {
+            id: Uuid::new_v4(),
+            strategy: "strat".to_string(),
+            path: Vec::new(),
+            expected_profit: dec!(1),
+            input_amount: dec!(1),
+            gas_estimate: 0,
+            block_number: 0,
+            timestamp: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn test_deduplicator_seen_and_cleared() {
+        let mut dedup = OpportunityDeduplicator::new(Duration::from_millis(50));
+        let opp = make_opportunity();
+        // First time: not duplicate
+        assert!(!dedup.is_duplicate(&opp));
+        // Immediately after: duplicate
+        assert!(dedup.is_duplicate(&opp));
+        // After TTL: cleared
+        thread::sleep(Duration::from_millis(60));
+        assert!(!dedup.is_duplicate(&opp));
+    }
+}

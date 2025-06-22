@@ -1,4 +1,4 @@
-use prometheus::{register_int_counter, register_int_counter_vec, IntCounter, IntCounterVec};
+use prometheus::{register_int_counter, register_int_counter_vec, IntCounter, IntCounterVec, Opts};
 
 /// Prometheus metrics for the detector service.
 pub struct DetectorMetrics {
@@ -11,18 +11,45 @@ pub struct DetectorMetrics {
 impl DetectorMetrics {
     /// Creates and registers all detector metrics.
     pub fn new() -> Self {
-        let disconnected_components = register_int_counter!(
+        let disconnected_components = match register_int_counter!(
             "detector_disconnected_components_total",
             "Number of disconnected graph components detected"
-        )
-        .expect("failed to register detector_disconnected_components metric");
+        ) {
+            Ok(c) => c,
+            Err(e) => match e {
+                prometheus::Error::AlreadyReg => prometheus::IntCounter::new(
+                    "detector_disconnected_components_total",
+                    "Number of disconnected graph components detected",
+                )
+                .unwrap(),
+                _ => panic!(
+                    "failed to register detector_disconnected_components metric: {}",
+                    e
+                ),
+            },
+        };
 
-        let strategy_failures = register_int_counter_vec!(
+        let strategy_failures = match register_int_counter_vec!(
             "detector_strategy_failures_total",
             "Number of strategy failures",
             &["strategy"]
-        )
-        .expect("failed to register detector_strategy_failures metric");
+        ) {
+            Ok(c) => c,
+            Err(e) => match e {
+                prometheus::Error::AlreadyReg => prometheus::IntCounterVec::new(
+                    Opts::new(
+                        "detector_strategy_failures_total",
+                        "Number of strategy failures",
+                    ),
+                    &["strategy"],
+                )
+                .unwrap(),
+                _ => panic!(
+                    "failed to register detector_strategy_failures metric: {}",
+                    e
+                ),
+            },
+        };
 
         DetectorMetrics {
             disconnected_components,

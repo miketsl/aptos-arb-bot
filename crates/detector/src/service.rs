@@ -190,3 +190,85 @@ impl DetectorService {
         self.price_graph = Arc::new(PriceGraph::new());
     }
 }
+
+#[cfg(test)]
+mod service_tests {
+    use super::*;
+    use crate::error::DetectorError;
+    use crate::graph::{Edge, PoolModel, PriceGraph};
+    use common::types::{Asset, Quantity, TradingPair};
+    use rust_decimal_macros::dec;
+    use std::str::FromStr;
+    use std::time::{Duration, Instant};
+    use tokio::sync::mpsc;
+
+    fn dummy_graph_edge() -> Edge {
+        let a = Asset::from_str("A").unwrap();
+        let b = Asset::from_str("B").unwrap();
+        Edge {
+            pair: TradingPair::new(a, b),
+            exchange: "dex".to_string(),
+            pool_address: "p".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(1)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        }
+    }
+
+    use crate::graph::AssetId;
+
+    #[tokio::test]
+    async fn test_handle_error_disconnected_component() {
+        let (_tx, rx) = mpsc::channel(1);
+        let (tx2, _rx2) = mpsc::channel(1);
+        let mut service = DetectorService::new(rx, tx2, vec![]).unwrap();
+        let initial = service.metrics.disconnected_components.get();
+        service
+            .handle_error(DetectorError::DisconnectedComponent(AssetId::new(0)))
+            .await;
+        assert_eq!(service.metrics.disconnected_components.get(), initial + 1);
+    }
+
+    #[tokio::test]
+    async fn test_handle_error_strategy_failed() {
+        let (_tx, rx) = mpsc::channel(1);
+        let (tx2, _rx2) = mpsc::channel(1);
+        let mut service = DetectorService::new(rx, tx2, vec![]).unwrap();
+        let counter = service
+            .metrics
+            .strategy_failures
+            .with_label_values(&["test"])
+            .get();
+        service
+            .handle_error(DetectorError::StrategyFailed(
+                "test".to_string(),
+                "err".to_string(),
+            ))
+            .await;
+        assert_eq!(
+            service
+                .metrics
+                .strategy_failures
+                .with_label_values(&["test"])
+                .get(),
+            counter + 1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_error_graph_corruption_resets_graph() {
+        let (_tx, rx) = mpsc::channel(1);
+        let (tx2, _rx2) = mpsc::channel(1);
+        let mut service = DetectorService::new(rx, tx2, vec![]).unwrap();
+        // Insert edge to graph
+        Arc::make_mut(&mut service.price_graph).update_edge(dummy_graph_edge());
+        let view_before = service.price_graph.create_view(&GraphView::All);
+        assert_eq!(view_before.graph.edge_count(), 1);
+        service.handle_error(DetectorError::GraphCorruption).await;
+        let view_after = service.price_graph.create_view(&GraphView::All);
+        assert_eq!(view_after.graph.edge_count(), 0);
+    }
+}

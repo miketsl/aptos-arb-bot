@@ -138,3 +138,67 @@ impl ArbitrageStrategy for MultiHopArbitrage {
         Box::new(self.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{Edge, PoolModel, PriceGraph};
+    use common::types::{Asset, GraphView, Quantity, TradingPair};
+    use rust_decimal_macros::dec;
+    use std::{str::FromStr, time::Instant};
+
+    #[tokio::test]
+    async fn test_multi_hop_detects_cycle() {
+        let mut graph = PriceGraph::new();
+        let a = Asset::from_str("A").unwrap();
+        let b = Asset::from_str("B").unwrap();
+        let c = Asset::from_str("C").unwrap();
+        let large_x = dec!(10000);
+        let large_y = dec!(20000);
+        let e_ab = Edge {
+            pair: TradingPair::new(a.clone(), b.clone()),
+            exchange: "dex".to_string(),
+            pool_address: "p_ab".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(large_x),
+                reserve_y: Quantity(large_y),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        let e_bc = Edge {
+            pair: TradingPair::new(b.clone(), c.clone()),
+            exchange: "dex".to_string(),
+            pool_address: "p_bc".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(large_x),
+                reserve_y: Quantity(large_y),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        let e_ca = Edge {
+            pair: TradingPair::new(c.clone(), a.clone()),
+            exchange: "dex".to_string(),
+            pool_address: "p_ca".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(large_x),
+                reserve_y: Quantity(large_y),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        graph.update_edge(e_ab);
+        graph.update_edge(e_bc);
+        graph.update_edge(e_ca);
+        let view = graph.create_view(&GraphView::All);
+        let config = MultiHopConfig {
+            max_hops: 3,
+            min_liquidity: dec!(0),
+            enable_cross_dex: true,
+        };
+        let strat = MultiHopArbitrage::new(config);
+        let opps = strat.detect_opportunities(&view, 0).await.unwrap();
+        assert!(!opps.is_empty(), "expected multi-hop opportunity");
+    }
+}

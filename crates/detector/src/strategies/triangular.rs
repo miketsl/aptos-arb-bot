@@ -3,8 +3,7 @@ use crate::graph::PriceGraphView;
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
-use common::types::Quantity;
-use common::types::{ArbitrageOpportunity, GraphView};
+use common::types::{ArbitrageOpportunity, GraphView, Quantity};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -105,5 +104,69 @@ impl ArbitrageStrategy for TriangularArbitrage {
         } else {
             vec![]
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{Edge, PoolModel, PriceGraph};
+    use common::types::{Asset, GraphView, Quantity, TradingPair};
+    use rust_decimal_macros::dec;
+    use std::{str::FromStr, time::Instant};
+
+    #[tokio::test]
+    async fn test_triangular_detects_cycle() {
+        let mut graph = PriceGraph::new();
+        let a = Asset::from_str("A").unwrap();
+        let b = Asset::from_str("B").unwrap();
+        let c = Asset::from_str("C").unwrap();
+        // Use large reserves to minimize slippage and create a profitable cycle
+        let large_x = dec!(10000);
+        let large_y = dec!(20000);
+        let e_ab = Edge {
+            pair: TradingPair::new(a.clone(), b.clone()),
+            exchange: "dex".to_string(),
+            pool_address: "p_ab".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(large_x),
+                reserve_y: Quantity(large_y),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        let e_bc = Edge {
+            pair: TradingPair::new(b.clone(), c.clone()),
+            exchange: "dex".to_string(),
+            pool_address: "p_bc".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(large_x),
+                reserve_y: Quantity(large_y),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        let e_ca = Edge {
+            pair: TradingPair::new(c.clone(), a.clone()),
+            exchange: "dex".to_string(),
+            pool_address: "p_ca".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(large_x),
+                reserve_y: Quantity(large_y),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        graph.update_edge(e_ab);
+        graph.update_edge(e_bc);
+        graph.update_edge(e_ca);
+        let view = graph.create_view(&GraphView::All);
+        let config = TriangularConfig {
+            max_path_length: 3,
+            target_dex: None,
+        };
+        let strat = TriangularArbitrage::new(config);
+        let opps = strat.detect_opportunities(&view, 0).await.unwrap();
+        assert!(!opps.is_empty(), "expected triangular opportunity");
     }
 }

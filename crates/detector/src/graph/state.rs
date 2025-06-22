@@ -213,3 +213,153 @@ pub struct PruneStats {
     pub pruned: usize,
     pub retained: usize,
 }
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+    use crate::graph::{Edge, PoolModel};
+    use common::types::{Asset, Quantity, TradingPair};
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+    use std::str::FromStr;
+    use std::time::{Duration, Instant};
+
+    fn create_edge_pair() -> (Asset, Asset) {
+        let ax = Asset::from_str("A").unwrap();
+        let ay = Asset::from_str("B").unwrap();
+        (ax, ay)
+    }
+
+    #[test]
+    fn test_prune_retains_high_tvl() {
+        let mut graph = PriceGraph::new();
+        let (ax, ay) = create_edge_pair();
+        let edge = Edge {
+            pair: common::types::TradingPair {
+                asset_x: ax.clone(),
+                asset_y: ay.clone(),
+            },
+            exchange: "ex".to_string(),
+            pool_address: "p".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(1)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        graph.update_edge(edge.clone());
+        // Make TVL below default min_tvl=0? No, set min_tvl > 0 to trigger removal if low TVL
+        graph.pruning_config.min_tvl = dec!(1);
+        // Update TVL manually
+        let (src, dst) = {
+            let ids: Vec<_> = graph.graph.all_edges().map(|(s, d, _)| (s, d)).collect();
+            ids[0]
+        };
+        let stats = graph.edge_activity.get_mut(&(src, dst)).unwrap();
+        stats.tvl = dec!(2);
+        let result = graph.prune();
+        assert_eq!(result.pruned, 0);
+        assert_eq!(result.retained, 1);
+    }
+
+    #[test]
+    fn test_prune_removes_low_tvl_and_stale() {
+        let mut graph = PriceGraph::new();
+        let (ax, ay) = create_edge_pair();
+        let edge = Edge {
+            pair: common::types::TradingPair {
+                asset_x: ax.clone(),
+                asset_y: ay.clone(),
+            },
+            exchange: "ex".to_string(),
+            pool_address: "p".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(1)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now() - Duration::from_secs(600),
+        };
+        graph.update_edge(edge.clone());
+        // Defer stats.last_update to stale (update_edge resets it)
+        let (src, dst) = graph
+            .graph
+            .all_edges()
+            .map(|(s, d, _)| (s, d))
+            .next()
+            .unwrap();
+        let stats = graph.edge_activity.get_mut(&(src, dst)).unwrap();
+        stats.last_update = Instant::now() - Duration::from_secs(600);
+        // Increase min_tvl so that tvl=0 < min_tvl and stale edge should be removed
+        graph.pruning_config.min_tvl = dec!(1);
+        let result = graph.prune();
+        assert_eq!(result.pruned, 1);
+        assert_eq!(result.retained, 0);
+    }
+
+    #[test]
+    fn test_prune_respects_protected_pairs() {
+        let mut graph = PriceGraph::new();
+        let (ax, ay) = create_edge_pair();
+        let edge = Edge {
+            pair: common::types::TradingPair {
+                asset_x: ax.clone(),
+                asset_y: ay.clone(),
+            },
+            exchange: "ex".to_string(),
+            pool_address: "p".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(1)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now() - Duration::from_secs(600),
+        };
+        graph.update_edge(edge.clone());
+        // Protect this pair
+        graph
+            .pruning_config
+            .protected_pairs
+            .push((ax.to_string(), ay.to_string()));
+        // tvl=0<min_tvl=1
+        graph.pruning_config.min_tvl = dec!(1);
+        let result = graph.prune();
+        assert_eq!(result.pruned, 0);
+        assert_eq!(result.retained, 1);
+    }
+
+    #[test]
+    fn test_prune_respects_opportunity_window() {
+        let mut graph = PriceGraph::new();
+        let (ax, ay) = create_edge_pair();
+        let edge = Edge {
+            pair: common::types::TradingPair {
+                asset_x: ax.clone(),
+                asset_y: ay.clone(),
+            },
+            exchange: "ex".to_string(),
+            pool_address: "p".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(1)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now() - Duration::from_secs(600),
+        };
+        graph.update_edge(edge.clone());
+        // Set opportunity_window to 1min
+        graph.pruning_config.opportunity_window = Duration::from_secs(60);
+        // Mark last_opportunity within window
+        let (src, dst) = {
+            let ids: Vec<_> = graph.graph.all_edges().map(|(s, d, _)| (s, d)).collect();
+            ids[0]
+        };
+        let stats = graph.edge_activity.get_mut(&(src, dst)).unwrap();
+        stats.last_opportunity = Some(Instant::now());
+        // tvl=0<min_tvl default=0, so keep because last_opportunity
+        let result = graph.prune();
+        assert_eq!(result.pruned, 0);
+        assert_eq!(result.retained, 1);
+    }
+}
