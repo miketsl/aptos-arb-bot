@@ -62,7 +62,8 @@ fn reserves_from_liquidity_and_sqrt_price(
     decimals_y: u32,
 ) -> Result<(Quantity, Quantity)> {
     let liquidity = Decimal::from(liquidity);
-    let sqrt_price = Decimal::from(sqrt_price_q64) / Decimal::from(2u64.pow(64));
+    // Interpret sqrt_price_q64 as Q64 fixed-point (divide by 2^64)
+    let sqrt_price = Decimal::from(sqrt_price_q64) / Decimal::from(2u128.pow(64));
 
     // reserve_y = liquidity / sqrt_price
     let reserve_y_unscaled = liquidity / sqrt_price;
@@ -73,4 +74,76 @@ fn reserves_from_liquidity_and_sqrt_price(
     let reserve_y = Quantity(reserve_y_unscaled / Decimal::from(10u64.pow(decimals_y)));
 
     Ok((reserve_x, reserve_y))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use common::types::{MarketUpdate, TokenPair, TickInfo, Quantity};
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+    use std::collections::HashMap;
+    use std::str::FromStr;
+
+    fn basic_update() -> MarketUpdate {
+        MarketUpdate {
+            pool_address: "0xPOOL".to_string(),
+            dex_name: "DEX".to_string(),
+            token_pair: TokenPair { token0: "0xA".to_string(), token1: "0xB".to_string() },
+            sqrt_price: 1u128 << 64,
+            liquidity: 1_000_000u128,
+            tick: 0,
+            fee_bps: 30,
+            tick_map: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_transform_constant_product() {
+        let update = basic_update();
+        let edge = transform_update(update).expect("transform failed");
+        // ConstantProduct branch: reserves should equal 1 after scaling
+        match edge.model {
+            PoolModel::ConstantProduct { reserve_x, reserve_y, fee_bps } => {
+                assert_eq!(reserve_x, Quantity(dec!(1)));
+                assert_eq!(reserve_y, Quantity(dec!(1)));
+                assert_eq!(fee_bps, 30);
+            }
+            _ => panic!("expected ConstantProduct model"),
+        }
+        assert_eq!(edge.pool_address, "0xPOOL");
+        assert_eq!(edge.exchange, "DEX");
+        // TradingPair direction preserved
+        assert_eq!(edge.pair.asset_x, Asset::from_str("0xA").unwrap());
+        assert_eq!(edge.pair.asset_y, Asset::from_str("0xB").unwrap());
+    }
+
+    #[test]
+    fn test_transform_concentrated_liquidity() {
+        let mut update = basic_update();
+        // Add one tick entry to trigger CLMM branch
+        let mut ticks = HashMap::new();
+        ticks.insert(2, TickInfo { liquidity_net: 0, liquidity_gross: 5u128 });
+        update.tick_map = ticks;
+        let edge = transform_update(update).expect("transform failed");
+        match edge.model {
+            PoolModel::ConcentratedLiquidity { ticks, fee_bps } => {
+                assert_eq!(fee_bps, 30);
+                assert_eq!(ticks.len(), 1);
+                let tick = &ticks[0];
+                assert_eq!(tick.price, Decimal::from(2));
+                assert_eq!(tick.liquidity_gross, Decimal::from(5u128));
+            }
+            _ => panic!("expected ConcentratedLiquidity model"),
+        }
+    }
+
+    #[test]
+    fn test_reserves_from_liquidity_and_sqrt_price() {
+        // sqrt_price = 1, liquidity = 1_000_000, decimals = 6
+        let (qx, qy) = reserves_from_liquidity_and_sqrt_price(1_000_000u128, 1u128 << 64, 6, 6)
+            .expect("reserves calc failed");
+        assert_eq!(qx, Quantity(dec!(1)));
+        assert_eq!(qy, Quantity(dec!(1)));
+    }
 }
