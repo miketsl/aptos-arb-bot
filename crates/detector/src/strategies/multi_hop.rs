@@ -89,30 +89,33 @@ impl ArbitrageStrategy for MultiHopArbitrage {
                     if neighbor != start && visited.contains(&neighbor) {
                         continue;
                     }
-                    let edge = graph.graph.edge_weight(current, neighbor).unwrap();
-                    if !enable_cross_dex {
-                        if let Some(first_edge) = path.first() {
-                            if edge.exchange != first_edge.exchange {
-                                continue;
+                    if let Some(edges) = graph.graph.edge_weight(current, neighbor) {
+                        for edge in edges {
+                            if !enable_cross_dex {
+                                if let Some(first_edge) = path.first() {
+                                    if edge.exchange != first_edge.exchange {
+                                        continue;
+                                    }
+                                }
                             }
+                            visited.insert(neighbor);
+                            path.push(edge);
+                            dfs(
+                                start,
+                                neighbor,
+                                graph,
+                                visited,
+                                path,
+                                one,
+                                max_hops,
+                                enable_cross_dex,
+                                opportunities,
+                                block_number,
+                            );
+                            path.pop();
+                            visited.remove(&neighbor);
                         }
                     }
-                    visited.insert(neighbor);
-                    path.push(edge);
-                    dfs(
-                        start,
-                        neighbor,
-                        graph,
-                        visited,
-                        path,
-                        one,
-                        max_hops,
-                        enable_cross_dex,
-                        opportunities,
-                        block_number,
-                    );
-                    path.pop();
-                    visited.remove(&neighbor);
                 }
             }
             visited.clear();

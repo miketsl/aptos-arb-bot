@@ -65,10 +65,10 @@ fn reserves_from_liquidity_and_sqrt_price(
     // Interpret sqrt_price_q64 as Q64 fixed-point (divide by 2^64)
     let sqrt_price = Decimal::from(sqrt_price_q64) / Decimal::from(2u128.pow(64));
 
-    // reserve_y = liquidity / sqrt_price
-    let reserve_y_unscaled = liquidity / sqrt_price;
-    // reserve_x = liquidity * sqrt_price
-    let reserve_x_unscaled = liquidity * sqrt_price;
+    // For CPMM pools: sqrt_price = sqrt(reserve_y / reserve_x)
+    // Hence reserve_x = liquidity / sqrt_price, reserve_y = liquidity * sqrt_price
+    let reserve_x_unscaled = liquidity / sqrt_price;
+    let reserve_y_unscaled = liquidity * sqrt_price;
 
     let reserve_x = Quantity(reserve_x_unscaled / Decimal::from(10u64.pow(decimals_x)));
     let reserve_y = Quantity(reserve_y_unscaled / Decimal::from(10u64.pow(decimals_y)));

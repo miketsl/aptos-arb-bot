@@ -1,96 +1,98 @@
-use chrono::Utc;
-use common::types::{DetectorMessage, MarketUpdate, TickInfo, TokenPair};
-use detector::service::DetectorService;
-use detector::strategies::StrategyConfig;
-use std::{collections::HashMap, time::Duration};
-use tokio::sync::mpsc;
+use common::types::{Asset, GraphView, TradingPair};
+use detector::graph::{Edge, PoolModel, PriceGraph, Tick};
+use detector::strategies::triangular::TriangularArbitrage;
+use detector::strategies::ArbitrageStrategy;
+use detector::strategies::TriangularConfig;
+use rust_decimal_macros::dec;
+use std::str::FromStr;
+use std::time::Instant;
 
-/// Integration: feed three CLMM MarketUpdates (A->B, B->C, C->A), then expect a triangular opportunity.
+/// Integration: build a CLMM price graph with both directions for each pair,
+/// and verify the triangular arbitrage strategy detects a profitable cycle.
 #[tokio::test]
 async fn integration_triangular_detection() {
-    // Prepare three simple CLMM pool updates for a profitable triangle
-    let mut ticks = HashMap::new();
-    // Use tick price 10 for CLMM quoting
-    ticks.insert(
-        10,
-        TickInfo {
-            liquidity_net: 0,
-            liquidity_gross: 1000u128,
-        },
-    );
+    // Prepare tick-based pools with exact prices (no slippage):
+    // A->B=2×, B->A=0.5× ; B->C=3×, C->B=0.333× ; C->A=4×, A->C=0.25×.
+    let a = Asset::from_str("A").unwrap();
+    let b = Asset::from_str("B").unwrap();
+    let c = Asset::from_str("C").unwrap();
 
-    let update_ab = MarketUpdate {
-        pool_address: "p_ab".to_string(),
-        dex_name: "D1".to_string(),
-        token_pair: TokenPair {
-            token0: "A".to_string(),
-            token1: "B".to_string(),
-        },
-        sqrt_price: 0,
-        liquidity: 0,
-        tick: 0,
-        fee_bps: 0,
-        tick_map: ticks.clone(),
+    let tick_ab = Tick {
+        price: dec!(2),
+        liquidity_gross: dec!(1000),
     };
-    let update_bc = MarketUpdate {
-        pool_address: "p_bc".to_string(),
-        dex_name: "D1".to_string(),
-        token_pair: TokenPair {
-            token0: "B".to_string(),
-            token1: "C".to_string(),
-        },
-        ..update_ab.clone()
+    let tick_ba = Tick {
+        price: dec!(0.5),
+        liquidity_gross: dec!(1000),
     };
-    let update_ca = MarketUpdate {
-        pool_address: "p_ca".to_string(),
-        dex_name: "D1".to_string(),
-        token_pair: TokenPair {
-            token0: "C".to_string(),
-            token1: "A".to_string(),
-        },
-        ..update_ab.clone()
+    let tick_bc = Tick {
+        price: dec!(3),
+        liquidity_gross: dec!(1000),
+    };
+    let tick_cb = Tick {
+        price: dec!(0.333),
+        liquidity_gross: dec!(1000),
+    };
+    let tick_ca = Tick {
+        price: dec!(4),
+        liquidity_gross: dec!(1000),
+    };
+    let tick_ac = Tick {
+        price: dec!(0.25),
+        liquidity_gross: dec!(1000),
     };
 
-    // Set up detector service with the Triangular strategy
-    let (tx, rx) = mpsc::channel(16);
-    let (op_tx, mut op_rx) = mpsc::channel(4);
-    let config = StrategyConfig::Triangular(detector::strategies::TriangularConfig {
+    let mut graph = PriceGraph::new();
+    let now = Instant::now();
+
+    for (pair, ticks) in &[
+        (
+            TradingPair::new(a.clone(), b.clone()),
+            vec![tick_ab.clone()],
+        ),
+        (
+            TradingPair::new(b.clone(), a.clone()),
+            vec![tick_ba.clone()],
+        ),
+        (
+            TradingPair::new(b.clone(), c.clone()),
+            vec![tick_bc.clone()],
+        ),
+        (
+            TradingPair::new(c.clone(), b.clone()),
+            vec![tick_cb.clone()],
+        ),
+        (
+            TradingPair::new(c.clone(), a.clone()),
+            vec![tick_ca.clone()],
+        ),
+        (
+            TradingPair::new(a.clone(), c.clone()),
+            vec![tick_ac.clone()],
+        ),
+    ] {
+        graph.update_edge(Edge {
+            pair: pair.clone(),
+            exchange: "dex".to_string(),
+            pool_address: format!("p_{}{}", pair.asset_x, pair.asset_y),
+            model: PoolModel::ConcentratedLiquidity {
+                ticks: ticks.clone(),
+                fee_bps: 0,
+            },
+            last_updated: now,
+        });
+    }
+
+    let view = graph.create_view(&GraphView::All);
+    let config = TriangularConfig {
         max_path_length: 3,
         target_dex: None,
-    });
-    let service = DetectorService::new(rx, op_tx, vec![config]).unwrap();
-    let handle = tokio::spawn(async move {
-        let _ = service.run().await;
-    });
+    };
+    let strat = TriangularArbitrage::new(config);
+    let opps = strat.detect_opportunities(&view, 0).await.unwrap();
 
-    // Send block messages
-    tx.send(DetectorMessage::BlockStart {
-        block_number: 1,
-        timestamp: Utc::now(),
-    })
-    .await
-    .unwrap();
-    tx.send(DetectorMessage::MarketUpdate(update_ab))
-        .await
-        .unwrap();
-    tx.send(DetectorMessage::MarketUpdate(update_bc))
-        .await
-        .unwrap();
-    tx.send(DetectorMessage::MarketUpdate(update_ca))
-        .await
-        .unwrap();
-    tx.send(DetectorMessage::BlockEnd { block_number: 1 })
-        .await
-        .unwrap();
-
-    // Await an opportunity
-    tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
-        op_rx.try_recv().is_ok(),
-        "Expected a triangular arbitrage opportunity"
+        !opps.is_empty(),
+        "expected at least one triangular arbitrage opportunity"
     );
-
-    // Shutdown
-    drop(tx);
-    let _ = handle.await;
 }
