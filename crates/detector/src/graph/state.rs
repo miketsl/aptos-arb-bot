@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 #[derive(Debug)]
 pub struct PriceGraphView<'a> {
     /// The underlying graph data or a filtered subgraph.
-    pub graph: Cow<'a, DiGraphMap<AssetId, Edge>>,
+    pub graph: Cow<'a, DiGraphMap<AssetId, Vec<Edge>>>,
     /// A map from asset IDs to asset definitions.
     pub asset_mapping: &'a HashMap<AssetId, Asset>,
 }
@@ -18,7 +18,7 @@ pub struct PriceGraphView<'a> {
 /// The main price graph, responsible for storing and managing market data.
 #[derive(Clone, Debug)]
 pub struct PriceGraph {
-    graph: DiGraphMap<AssetId, Edge>,
+    graph: DiGraphMap<AssetId, Vec<Edge>>,
     asset_mapping: HashMap<AssetId, Asset>,
     reverse_mapping: HashMap<Asset, AssetId>,
     next_id: u64,
@@ -47,7 +47,18 @@ impl PriceGraph {
     pub fn update_edge(&mut self, edge: Edge) {
         let source_id = self.get_or_create_asset_id(&edge.pair.asset_x);
         let target_id = self.get_or_create_asset_id(&edge.pair.asset_y);
-        self.graph.add_edge(source_id, target_id, edge.clone());
+        if let Some(existing_edges) = self.graph.edge_weight_mut(source_id, target_id) {
+            match existing_edges
+                .iter_mut()
+                .find(|e| e.pool_address == edge.pool_address)
+            {
+                Some(existing) => *existing = edge.clone(),
+                None => existing_edges.push(edge.clone()),
+            }
+        } else {
+            self.graph
+                .add_edge(source_id, target_id, vec![edge.clone()]);
+        }
         // Record update timestamp and TVL for pruning metrics
         let stats = self
             .edge_activity
@@ -64,10 +75,20 @@ impl PriceGraph {
                 asset_mapping: &self.asset_mapping,
             },
             GraphView::PairFiltered(pair) => {
-                let mut sub = DiGraphMap::new();
-                for (source, target, edge) in self.graph.all_edges() {
-                    if edge.pair.asset_x == pair.asset_x && edge.pair.asset_y == pair.asset_y {
-                        sub.add_edge(source, target, edge.clone());
+                let mut sub: DiGraphMap<AssetId, Vec<Edge>> = DiGraphMap::new();
+                for (source, target, edges) in self.graph.all_edges() {
+                    for edge in edges {
+                        let a = &pair.asset_x;
+                        let b = &pair.asset_y;
+                        if (edge.pair.asset_x == *a && edge.pair.asset_y == *b)
+                            || (edge.pair.asset_x == *b && edge.pair.asset_y == *a)
+                        {
+                            if let Some(existing) = sub.edge_weight_mut(source, target) {
+                                existing.push(edge.clone());
+                            } else {
+                                sub.add_edge(source, target, vec![edge.clone()]);
+                            }
+                        }
                     }
                 }
                 PriceGraphView {
@@ -76,10 +97,16 @@ impl PriceGraph {
                 }
             }
             GraphView::DexFiltered(dex) => {
-                let mut sub = DiGraphMap::new();
-                for (source, target, edge) in self.graph.all_edges() {
-                    if &edge.exchange == dex {
-                        sub.add_edge(source, target, edge.clone());
+                let mut sub: DiGraphMap<AssetId, Vec<Edge>> = DiGraphMap::new();
+                for (source, target, edges) in self.graph.all_edges() {
+                    for edge in edges {
+                        if &edge.exchange == dex {
+                            if let Some(existing) = sub.edge_weight_mut(source, target) {
+                                existing.push(edge.clone());
+                            } else {
+                                sub.add_edge(source, target, vec![edge.clone()]);
+                            }
+                        }
                     }
                 }
                 PriceGraphView {
@@ -96,8 +123,11 @@ impl PriceGraph {
         let stale_edges: Vec<(AssetId, AssetId)> = self
             .graph
             .all_edges()
-            .filter_map(|(source, target, edge)| {
-                if now.duration_since(edge.last_updated) > max_age {
+            .filter_map(|(source, target, edges)| {
+                if edges
+                    .iter()
+                    .any(|edge| now.duration_since(edge.last_updated) > max_age)
+                {
                     Some((source, target))
                 } else {
                     None
@@ -212,4 +242,153 @@ impl Default for PruningConfig {
 pub struct PruneStats {
     pub pruned: usize,
     pub retained: usize,
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+    use crate::graph::{Edge, PoolModel};
+    use common::types::{Asset, Quantity};
+    use rust_decimal_macros::dec;
+    use std::str::FromStr;
+    use std::time::{Duration, Instant};
+
+    fn create_edge_pair() -> (Asset, Asset) {
+        let ax = Asset::from_str("A").unwrap();
+        let ay = Asset::from_str("B").unwrap();
+        (ax, ay)
+    }
+
+    #[test]
+    fn test_prune_retains_high_tvl() {
+        let mut graph = PriceGraph::new();
+        let (ax, ay) = create_edge_pair();
+        let edge = Edge {
+            pair: common::types::TradingPair {
+                asset_x: ax.clone(),
+                asset_y: ay.clone(),
+            },
+            exchange: "ex".to_string(),
+            pool_address: "p".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(1)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        graph.update_edge(edge.clone());
+        // Make TVL below default min_tvl=0? No, set min_tvl > 0 to trigger removal if low TVL
+        graph.pruning_config.min_tvl = dec!(1);
+        // Update TVL manually
+        let (src, dst) = {
+            let ids: Vec<_> = graph.graph.all_edges().map(|(s, d, _)| (s, d)).collect();
+            ids[0]
+        };
+        let stats = graph.edge_activity.get_mut(&(src, dst)).unwrap();
+        stats.tvl = dec!(2);
+        let result = graph.prune();
+        assert_eq!(result.pruned, 0);
+        assert_eq!(result.retained, 1);
+    }
+
+    #[test]
+    fn test_prune_removes_low_tvl_and_stale() {
+        let mut graph = PriceGraph::new();
+        let (ax, ay) = create_edge_pair();
+        let edge = Edge {
+            pair: common::types::TradingPair {
+                asset_x: ax.clone(),
+                asset_y: ay.clone(),
+            },
+            exchange: "ex".to_string(),
+            pool_address: "p".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(1)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now() - Duration::from_secs(600),
+        };
+        graph.update_edge(edge.clone());
+        // Defer stats.last_update to stale (update_edge resets it)
+        let (src, dst) = graph
+            .graph
+            .all_edges()
+            .map(|(s, d, _)| (s, d))
+            .next()
+            .unwrap();
+        let stats = graph.edge_activity.get_mut(&(src, dst)).unwrap();
+        stats.last_update = Instant::now() - Duration::from_secs(600);
+        // Increase min_tvl so that tvl=0 < min_tvl and stale edge should be removed
+        graph.pruning_config.min_tvl = dec!(1);
+        let result = graph.prune();
+        assert_eq!(result.pruned, 1);
+        assert_eq!(result.retained, 0);
+    }
+
+    #[test]
+    fn test_prune_respects_protected_pairs() {
+        let mut graph = PriceGraph::new();
+        let (ax, ay) = create_edge_pair();
+        let edge = Edge {
+            pair: common::types::TradingPair {
+                asset_x: ax.clone(),
+                asset_y: ay.clone(),
+            },
+            exchange: "ex".to_string(),
+            pool_address: "p".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(1)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now() - Duration::from_secs(600),
+        };
+        graph.update_edge(edge.clone());
+        // Protect this pair
+        graph
+            .pruning_config
+            .protected_pairs
+            .push((ax.to_string(), ay.to_string()));
+        // tvl=0<min_tvl=1
+        graph.pruning_config.min_tvl = dec!(1);
+        let result = graph.prune();
+        assert_eq!(result.pruned, 0);
+        assert_eq!(result.retained, 1);
+    }
+
+    #[test]
+    fn test_prune_respects_opportunity_window() {
+        let mut graph = PriceGraph::new();
+        let (ax, ay) = create_edge_pair();
+        let edge = Edge {
+            pair: common::types::TradingPair {
+                asset_x: ax.clone(),
+                asset_y: ay.clone(),
+            },
+            exchange: "ex".to_string(),
+            pool_address: "p".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(1)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now() - Duration::from_secs(600),
+        };
+        graph.update_edge(edge.clone());
+        // Set opportunity_window to 1min
+        graph.pruning_config.opportunity_window = Duration::from_secs(60);
+        // Mark last_opportunity within window
+        let (src, dst) = {
+            let ids: Vec<_> = graph.graph.all_edges().map(|(s, d, _)| (s, d)).collect();
+            ids[0]
+        };
+        let stats = graph.edge_activity.get_mut(&(src, dst)).unwrap();
+        stats.last_opportunity = Some(Instant::now());
+        // tvl=0<min_tvl default=0, so keep because last_opportunity
+        let result = graph.prune();
+        assert_eq!(result.pruned, 0);
+        assert_eq!(result.retained, 1);
+    }
 }

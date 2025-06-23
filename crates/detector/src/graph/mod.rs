@@ -404,7 +404,9 @@ mod tests {
             .map(|(id, _)| *id)
             .unwrap();
 
-        let edge = view.graph.edge_weight(source_id, target_id).unwrap();
+        let edges = view.graph.edge_weight(source_id, target_id).unwrap();
+        assert_eq!(edges.len(), 1);
+        let edge = &edges[0];
         if let PoolModel::ConcentratedLiquidity { ticks, .. } = &edge.model {
             assert_eq!(ticks.len(), 2);
             assert_eq!(ticks[0].price, dec!(100));

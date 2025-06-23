@@ -1,8 +1,10 @@
 use super::{ArbitrageStrategy, CrossDexConfig};
-use crate::graph::PriceGraphView;
+use crate::graph::{Edge, PoolModel, PriceGraphView};
 use anyhow::Result;
 use async_trait::async_trait;
-use common::types::{ArbitrageOpportunity, GraphView};
+use common::types::TradingPair;
+use common::types::{ArbitrageOpportunity, GraphView, Quantity};
+use rust_decimal::Decimal;
 use rust_decimal::MathematicalOps;
 
 #[derive(Clone)]
@@ -47,76 +49,108 @@ impl ArbitrageStrategy for CrossDexArbitrage {
             } else {
                 (asset_y.clone(), asset_x.clone())
             };
-
             if processed_pairs.contains(&sorted_pair) {
                 continue;
             }
-            processed_pairs.insert(sorted_pair.clone());
+            processed_pairs.insert(sorted_pair);
 
-            let forward_edges: Vec<_> = graph_view
+            let forward_edges: Vec<&Edge> = graph_view
                 .graph
                 .edges(source_id)
                 .filter(|(_, target, _)| *target == target_id)
-                .map(|(_, _, edge)| edge)
+                .flat_map(|(_, _, edges)| edges.iter())
                 .collect();
 
-            let reverse_edges: Vec<_> = graph_view
+            let reverse_edges: Vec<&Edge> = graph_view
                 .graph
                 .edges(target_id)
                 .filter(|(_, target, _)| *target == source_id)
-                .map(|(_, _, edge)| edge)
+                .flat_map(|(_, _, edges)| edges.iter())
                 .collect();
 
-            for buy_edge in &forward_edges {
-                for sell_edge in &reverse_edges {
+            for &buy_edge in &forward_edges {
+                for &sell_edge in &reverse_edges {
                     if buy_edge.exchange == sell_edge.exchange {
                         continue;
                     }
 
+                    // Compute optimal cross-DEX input via geometric mean of prices
+                    println!(
+                        "Cross-dex candidate: buy {} on {}, sell on {} via pools {} / {}",
+                        buy_edge.pair,
+                        buy_edge.exchange,
+                        sell_edge.exchange,
+                        buy_edge.pool_address,
+                        sell_edge.pool_address
+                    );
                     if let (
-                        super::super::graph::PoolModel::ConstantProduct {
-                            reserve_x: reserve_x1,
-                            reserve_y: reserve_y1,
+                        PoolModel::ConstantProduct {
+                            reserve_x: rx1,
+                            reserve_y: ry1,
                             ..
                         },
-                        super::super::graph::PoolModel::ConstantProduct {
-                            reserve_x: reserve_x2,
-                            reserve_y: reserve_y2,
+                        PoolModel::ConstantProduct {
+                            reserve_x: rx2,
+                            reserve_y: ry2,
                             ..
                         },
                     ) = (&buy_edge.model, &sell_edge.model)
                     {
-                        let price1 = reserve_y1.0 / reserve_x1.0;
-                        let price2 = reserve_y2.0 / reserve_x2.0;
-
-                        if price2 > price1 {
-                            if let Some(sqrt_price) = (price1 * price2).sqrt() {
-                                let optimal_input = sqrt_price * reserve_x1.0 - reserve_x1.0;
-                                if optimal_input > rust_decimal::Decimal::ZERO {
-                                    if let Some(amount_out) = buy_edge
-                                        .quote(&common::types::Quantity(optimal_input), asset_x)
-                                    {
-                                        if let Some(final_amount) =
-                                            sell_edge.quote(&amount_out, asset_y)
-                                        {
-                                            let profit = final_amount.0 - optimal_input;
-                                            if profit > rust_decimal::Decimal::ZERO {
-                                                let opportunity = ArbitrageOpportunity {
-                                                    id: uuid::Uuid::new_v4(),
-                                                    strategy: self.name().to_string(),
-                                                    path: vec![
-                                                        buy_edge.to_serializable(),
-                                                        sell_edge.to_serializable(),
-                                                    ],
-                                                    expected_profit: profit,
-                                                    input_amount: optimal_input,
-                                                    gas_estimate: 0, // Placeholder
-                                                    block_number,
-                                                    timestamp: chrono::Utc::now(),
-                                                };
-                                                opportunities.push(opportunity);
-                                            }
-                                        }
+                        // Constant-product optimum input for cross-DEX arbitrage
+                        println!(
+                            "Reserves => x1={}, y1={}, x2={}, y2={}",
+                            rx1.0, ry1.0, rx2.0, ry2.0
+                        );
+                        let radicand = rx1.0 * ry1.0 * rx2.0 * ry2.0;
+                        if let Some(root) = radicand.sqrt() {
+                            let numerator = root - (rx1.0 * rx2.0);
+                            if numerator <= Decimal::ZERO {
+                                continue;
+                            }
+                            let denominator = rx2.0 + ry1.0;
+                            if denominator == Decimal::ZERO {
+                                continue;
+                            }
+                            let optimal_in = numerator / denominator;
+                            if optimal_in <= Decimal::ZERO {
+                                continue;
+                            }
+                            let qty = common::types::Quantity(optimal_in);
+                            if let Some(mid) = buy_edge.quote(&qty, asset_x) {
+                                if let Some(out) = sell_edge.quote(&mid, asset_y) {
+                                    let profit = out.0 - optimal_in;
+                                    if profit > Decimal::ZERO {
+                                        // Human-readable arbitrage summary
+                                        println!(
+                                            "SWAP {} {} on {} -> get {} {}; SWAP {} {} on {} -> get {} {}; {}-{}=={} profit of {}",
+                                            optimal_in,
+                                            asset_x,
+                                            buy_edge.exchange,
+                                            mid.0,
+                                            asset_y,
+                                            mid.0,
+                                            asset_y,
+                                            sell_edge.exchange,
+                                            out.0,
+                                            asset_x,
+                                            out.0,
+                                            optimal_in,
+                                            profit,
+                                            asset_x,
+                                        );
+                                        opportunities.push(ArbitrageOpportunity {
+                                            id: uuid::Uuid::new_v4(),
+                                            strategy: self.name().to_string(),
+                                            path: vec![
+                                                buy_edge.to_serializable(),
+                                                sell_edge.to_serializable(),
+                                            ],
+                                            expected_profit: profit,
+                                            input_amount: optimal_in,
+                                            gas_estimate: 0,
+                                            block_number,
+                                            timestamp: chrono::Utc::now(),
+                                        });
                                     }
                                 }
                             }
@@ -137,11 +171,95 @@ impl ArbitrageStrategy for CrossDexArbitrage {
         &self,
         updated: &std::collections::HashSet<common::types::TradingPair>,
     ) -> Vec<GraphView> {
-        // Only run cross-DEX on pairs that had updates in this block
+        // Only run cross-DEX once per unordered pair that had updates in this block
+        let mut seen = std::collections::HashSet::new();
         updated
             .iter()
-            .cloned()
-            .map(GraphView::PairFiltered)
+            .filter_map(|tp| {
+                let sorted = if tp.asset_x < tp.asset_y {
+                    (tp.asset_x.clone(), tp.asset_y.clone())
+                } else {
+                    (tp.asset_y.clone(), tp.asset_x.clone())
+                };
+                if seen.insert(sorted.clone()) {
+                    Some(GraphView::PairFiltered(TradingPair::new(
+                        sorted.0, sorted.1,
+                    )))
+                } else {
+                    None
+                }
+            })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+    use crate::graph::{Edge, PoolModel, PriceGraph};
+    use common::types::{Asset, GraphView, Quantity, TradingPair};
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+    use std::time::Instant;
+
+    #[tokio::test]
+    async fn test_cross_dex_arbitrage_logic() {
+        let mut graph = PriceGraph::new();
+        let a = Asset::from("A");
+        let b = Asset::from("B");
+        // D1: A->B = 1.5, B->A = 0.666...
+        let e1 = Edge {
+            pair: TradingPair::new(a.clone(), b.clone()),
+            exchange: "D1".to_string(),
+            pool_address: "p1".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(1.5)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        let e2 = Edge {
+            pair: TradingPair::new(b.clone(), a.clone()),
+            exchange: "D1".to_string(),
+            pool_address: "p1_rev".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(0.6666667)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        // D2: A->B = 2.0, B->A = 0.5
+        let e3 = Edge {
+            pair: TradingPair::new(a.clone(), b.clone()),
+            exchange: "D2".to_string(),
+            pool_address: "p2".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(2)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        let e4 = Edge {
+            pair: TradingPair::new(b.clone(), a.clone()),
+            exchange: "D2".to_string(),
+            pool_address: "p2_rev".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(dec!(1)),
+                reserve_y: Quantity(dec!(0.5)),
+                fee_bps: 0,
+            },
+            last_updated: Instant::now(),
+        };
+        graph.update_edge(e1);
+        graph.update_edge(e2);
+        graph.update_edge(e3);
+        graph.update_edge(e4);
+        let view = graph.create_view(&GraphView::All);
+        let strat = CrossDexArbitrage::new(CrossDexConfig {});
+        let opps = strat.detect_opportunities(&view, 0).await.unwrap();
+        assert!(!opps.is_empty(), "Cross-DEX arbitrage was not detected");
     }
 }
