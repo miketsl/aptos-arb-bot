@@ -6,6 +6,8 @@ pub struct DetectorMetrics {
     pub disconnected_components: IntCounter,
     /// Number of strategy failures, labeled by strategy name.
     pub strategy_failures: IntCounterVec,
+    /// Number of opportunities dropped due to full channel.
+    pub dropped_opportunities: IntCounter,
 }
 
 impl DetectorMetrics {
@@ -51,9 +53,28 @@ impl DetectorMetrics {
             },
         };
 
+        let dropped_opportunities = match register_int_counter!(
+            "detector_dropped_opportunities_total",
+            "Number of opportunities dropped due to full channel"
+        ) {
+            Ok(c) => c,
+            Err(e) => match e {
+                prometheus::Error::AlreadyReg => prometheus::IntCounter::new(
+                    "detector_dropped_opportunities_total",
+                    "Number of opportunities dropped due to full channel",
+                )
+                .unwrap(),
+                _ => panic!(
+                    "failed to register detector_dropped_opportunities metric: {}",
+                    e
+                ),
+            },
+        };
+
         DetectorMetrics {
             disconnected_components,
             strategy_failures,
+            dropped_opportunities,
         }
     }
 }

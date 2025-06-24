@@ -61,17 +61,75 @@ fn reserves_from_liquidity_and_sqrt_price(
     decimals_x: u32,
     decimals_y: u32,
 ) -> Result<(Quantity, Quantity)> {
+    // Bounds checking to prevent overflow/underflow
+    if sqrt_price_q64 == 0 {
+        return Err(anyhow::anyhow!("sqrt_price cannot be zero"));
+    }
+    
+    // Check for values that are too large for Decimal before conversion
+    // Decimal::MAX is approximately 79,228,162,514,264,337,593,543,950,335
+    const MAX_SAFE_U128: u128 = 79_228_162_514_264_337_593_543_950_335;
+    
+    if liquidity > MAX_SAFE_U128 {
+        return Err(anyhow::anyhow!("liquidity value {} too large for decimal conversion", liquidity));
+    }
+    
+    if sqrt_price_q64 > MAX_SAFE_U128 {
+        return Err(anyhow::anyhow!("sqrt_price value {} too large for decimal conversion", sqrt_price_q64));
+    }
+    
+    // Convert to Decimal with bounds checking
     let liquidity = Decimal::from(liquidity);
+    
     // Interpret sqrt_price_q64 as Q64 fixed-point (divide by 2^64)
-    let sqrt_price = Decimal::from(sqrt_price_q64) / Decimal::from(2u128.pow(64));
+    let sqrt_price_raw = Decimal::from(sqrt_price_q64);
+    
+    let q64_divisor = Decimal::from(2u128.pow(64));
+    let sqrt_price = sqrt_price_raw / q64_divisor;
+    
+    // Sanity check: sqrt_price should be positive and reasonable
+    if sqrt_price <= Decimal::ZERO {
+        return Err(anyhow::anyhow!("sqrt_price must be positive"));
+    }
+    
+    // Additional bounds checking to prevent extreme calculations
+    const MAX_REASONABLE_SQRT_PRICE: &str = "1000000000"; // 1 billion
+    const MIN_REASONABLE_SQRT_PRICE: &str = "0.000000001"; // 1 nano
+    
+    let max_sqrt_price = Decimal::from_str(MAX_REASONABLE_SQRT_PRICE)?;
+    let min_sqrt_price = Decimal::from_str(MIN_REASONABLE_SQRT_PRICE)?;
+    
+    if sqrt_price > max_sqrt_price || sqrt_price < min_sqrt_price {
+        return Err(anyhow::anyhow!(
+            "sqrt_price {} is outside reasonable bounds [{}, {}]",
+            sqrt_price, min_sqrt_price, max_sqrt_price
+        ));
+    }
 
     // For CPMM pools: sqrt_price = sqrt(reserve_y / reserve_x)
     // Hence reserve_x = liquidity / sqrt_price, reserve_y = liquidity * sqrt_price
-    let reserve_x_unscaled = liquidity / sqrt_price;
-    let reserve_y_unscaled = liquidity * sqrt_price;
+    let reserve_x_unscaled = match liquidity.checked_div(sqrt_price) {
+        Some(result) => result,
+        None => return Err(anyhow::anyhow!("Division overflow in reserve_x calculation")),
+    };
+    
+    let reserve_y_unscaled = match liquidity.checked_mul(sqrt_price) {
+        Some(result) => result,
+        None => return Err(anyhow::anyhow!("Multiplication overflow in reserve_y calculation")),
+    };
 
-    let reserve_x = Quantity(reserve_x_unscaled / Decimal::from(10u64.pow(decimals_x)));
-    let reserve_y = Quantity(reserve_y_unscaled / Decimal::from(10u64.pow(decimals_y)));
+    let decimals_x_divisor = Decimal::from(10u64.pow(decimals_x));
+    let decimals_y_divisor = Decimal::from(10u64.pow(decimals_y));
+    
+    let reserve_x = match reserve_x_unscaled.checked_div(decimals_x_divisor) {
+        Some(result) => Quantity(result),
+        None => return Err(anyhow::anyhow!("Division overflow in reserve_x scaling")),
+    };
+    
+    let reserve_y = match reserve_y_unscaled.checked_div(decimals_y_divisor) {
+        Some(result) => Quantity(result),
+        None => return Err(anyhow::anyhow!("Division overflow in reserve_y scaling")),
+    };
 
     Ok((reserve_x, reserve_y))
 }
@@ -158,5 +216,41 @@ mod tests {
             .expect("reserves calc failed");
         assert_eq!(qx, Quantity(dec!(1)));
         assert_eq!(qy, Quantity(dec!(1)));
+    }
+
+    #[test]
+    fn test_extreme_values_rejected() {
+        // Test that extremely large values are rejected
+        let result = reserves_from_liquidity_and_sqrt_price(u128::MAX, u128::MAX / 2, 6, 6);
+        assert!(result.is_err());
+        
+        // Test that zero sqrt_price is rejected
+        let result = reserves_from_liquidity_and_sqrt_price(1_000_000, 0, 6, 6);
+        assert!(result.is_err());
+        
+        // Test that extremely small sqrt_price is rejected
+        let result = reserves_from_liquidity_and_sqrt_price(1_000_000, 1, 6, 6);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reasonable_extreme_values_accepted() {
+        // Test high but reasonable values
+        let result = reserves_from_liquidity_and_sqrt_price(
+            1_000_000_000_000u128, 
+            (1u128 << 64) * 1000, 
+            6, 
+            6
+        );
+        assert!(result.is_ok());
+        
+        // Test low but reasonable values
+        let result = reserves_from_liquidity_and_sqrt_price(
+            1, 
+            (1u128 << 64) / 1000, 
+            6, 
+            6
+        );
+        assert!(result.is_ok());
     }
 }
