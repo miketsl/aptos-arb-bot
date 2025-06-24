@@ -3,7 +3,7 @@ use crate::graph::{Edge, PoolModel, PriceGraphView};
 use anyhow::Result;
 use async_trait::async_trait;
 use common::types::TradingPair;
-use common::types::{ArbitrageOpportunity, GraphView, Quantity};
+use common::types::{ArbitrageOpportunity, GraphView};
 use rust_decimal::Decimal;
 use rust_decimal::MathematicalOps;
 
@@ -198,7 +198,6 @@ mod unit_tests {
     use super::*;
     use crate::graph::{Edge, PoolModel, PriceGraph};
     use common::types::{Asset, GraphView, Quantity, TradingPair};
-    use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
     use std::time::Instant;
 

@@ -139,8 +139,16 @@ impl DetectorService {
                 Ok((_name, Ok(opportunities))) => {
                     for opp in opportunities {
                         if !self.deduplicator.is_duplicate(&opp) {
-                            if let Err(_e) = self.opportunity_sender.send(opp).await {
-                                self.handle_error(DetectorError::ChannelClosed).await;
+                            // Use try_send to avoid blocking if the channel is full
+                            match self.opportunity_sender.try_send(opp) {
+                                Ok(()) => {},
+                                Err(mpsc::error::TrySendError::Full(_)) => {
+                                    warn!("Opportunity channel full, dropping opportunity");
+                                    self.metrics.dropped_opportunities.inc();
+                                },
+                                Err(mpsc::error::TrySendError::Closed(_)) => {
+                                    self.handle_error(DetectorError::ChannelClosed).await;
+                                }
                             }
                         }
                     }
@@ -195,11 +203,11 @@ impl DetectorService {
 mod service_tests {
     use super::*;
     use crate::error::DetectorError;
-    use crate::graph::{Edge, PoolModel, PriceGraph};
+    use crate::graph::{Edge, PoolModel};
     use common::types::{Asset, GraphView, Quantity, TradingPair};
     use rust_decimal_macros::dec;
     use std::str::FromStr;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
     use tokio::sync::mpsc;
 
     fn dummy_graph_edge() -> Edge {
