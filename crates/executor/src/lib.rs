@@ -184,37 +184,55 @@ impl<E: Display + Clone> TradeExecutor<E> {
 
 // Implementation of IsExecutor trait for integration with the detector
 #[async_trait]
-impl<E: Display + Clone + Send + Sync> IsExecutor for TradeExecutor<E> {
+impl IsExecutor for TradeExecutor<String> {
     async fn execute_trade(&self, opportunity: &ArbitrageOpportunity) -> anyhow::Result<()> {
         log::info!(
-            "Executing arbitrage opportunity {} with expected profit: {}",
+            "Executing arbitrage opportunity {} with {} hops and expected profit: {}",
             opportunity.id,
+            opportunity.path.len(),
             opportunity.expected_profit
         );
 
-        // TODO: This is a placeholder. The actual implementation should derive
-        // the correct orders from the opportunity's path.
-        if let Some(first_edge) = opportunity.path.first() {
+        if opportunity.path.is_empty() {
+            anyhow::bail!("Cannot execute opportunity {}: empty arbitrage path", opportunity.id);
+        }
+
+        // This simulation assumes the `ArbitrageOpportunity` and `Edge` structs
+        // from the `detector/architecture.md` document. These types will need to be
+        // available from a shared `common` crate.
+
+        let mut current_quantity = opportunity.input_amount;
+
+        for (i, edge) in opportunity.path.iter().enumerate() {
+            // TODO: The price is not available on the `Edge` struct. It should be
+            // derived from the graph during detection and included in the path.
+            // For now, using a placeholder.
+            let placeholder_price = common::types::Price(dec!(1.0));
+
+            // TODO: The order type (Buy/Sell) needs to be determined for each step.
+            // This depends on the asset pair's convention (e.g., APT/USDC).
+            // For now, we assume `Buy` for simulation purposes.
             let order = Order {
-                id: opportunity.id.to_string(),
-                pair: common::types::AssetPair::new(
-                    first_edge.pair.asset_x.clone(),
-                    first_edge.pair.asset_y.clone(),
-                ),
+                id: format!("{}-{}", opportunity.id, i),
+                pair: common::types::AssetPair::new(edge.from_token.clone(), edge.to_token.clone()),
                 order_type: common::types::OrderType::Buy, // Placeholder
-                price: common::types::Price(opportunity.expected_profit), // Placeholder
-                quantity: common::types::Quantity(opportunity.input_amount),
-                exchange: first_edge.exchange.to_string(), // This is not generic, needs fixing
+                price: placeholder_price,
+                quantity: common::types::Quantity(current_quantity),
+                exchange: edge.dex_name.clone(),
             };
 
-            // The execute_trade method in this file expects a generic E, but we have a String.
-            // This part of the code needs a more significant refactor to align the types,
-            // which is beyond the scope of Phase 1. For now, we will log and return Ok.
-            log::info!("Simulating trade execution for order: {:?}", order);
-            Ok(())
-        } else {
-            anyhow::bail!("Empty arbitrage path")
+            log::info!("Executing step {}/{}: {:?}", i + 1, opportunity.path.len(), order);
+            let result = self.simulate_onchain_trade(&order).await;
+
+            if result.status != TradeStatus::Filled {
+                anyhow::bail!("Trade execution failed at step {}: {:?}", i + 1, result);
+            }
+            // The output quantity of one trade becomes the input for the next.
+            current_quantity = result.filled_quantity.0;
         }
+
+        log::info!("Successfully executed all steps for opportunity {}", opportunity.id);
+        Ok(())
     }
 }
 
