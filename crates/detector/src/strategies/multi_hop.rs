@@ -45,6 +45,7 @@ impl ArbitrageStrategy for MultiHopArbitrage {
         let mut path = Vec::with_capacity(max_hops);
 
         for start in graph.graph.nodes() {
+            #[allow(clippy::too_many_arguments)]
             fn dfs<'a>(
                 start: AssetId,
                 current: AssetId,
@@ -57,7 +58,7 @@ impl ArbitrageStrategy for MultiHopArbitrage {
                 opportunities: &mut Vec<ArbitrageOpportunity>,
                 block_number: u64,
             ) {
-                if path.len() > 0 && current == start {
+                if !path.is_empty() && current == start {
                     let mut amount = one;
                     for edge in path.iter() {
                         if let Some(out) = edge.quote(&amount, &edge.pair.asset_x) {

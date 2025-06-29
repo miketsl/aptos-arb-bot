@@ -63,7 +63,7 @@ impl PriceGraph {
         let stats = self
             .edge_activity
             .entry((source_id, target_id))
-            .or_insert_with(ActivityStats::new);
+            .or_default();
         stats.last_update = Instant::now();
     }
 
@@ -214,6 +214,12 @@ impl ActivityStats {
             total_volume: Decimal::ZERO,
             tvl: Decimal::ZERO,
         }
+    }
+}
+
+impl Default for ActivityStats {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

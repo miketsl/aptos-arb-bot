@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use common::types::{Event, MarketUpdate, TickInfo, TokenPair};
+use common::types::{
+    ClmmMarketUpdate, ConstantProductMarketUpdate, Event, MarketUpdate, Quantity,
+    StableSwapMarketUpdate, TickInfo, TokenPair, WeightedPoolMarketUpdate,
+};
 use dashmap::DashMap;
 use dex_adapter_trait::DexAdapter;
 use serde::Deserialize;
@@ -39,15 +42,68 @@ struct PoolSnapshotData {
     tick_map: HashMap<i32, TickInfo>,
 }
 
+// For Constant Product Market Makers (CPMM)
+#[derive(Deserialize, Debug, Clone)]
+struct AmmPoolSnapshotData {
+    pool_id: String,
+    token_a: String,
+    token_b: String,
+    reserve_x: Quantity,
+    reserve_y: Quantity,
+    fee_bps: u32,
+}
+
+// For StableSwap pools
+#[derive(Deserialize, Debug, Clone)]
+struct StableSwapPoolSnapshotData {
+    pool_id: String,
+    token_a: String,
+    token_b: String,
+    reserves: Vec<Quantity>,
+    amplification_factor: u128,
+    fee_bps: u32,
+}
+
+// For Weighted Pools
+#[derive(Deserialize, Debug, Clone)]
+struct WeightedPoolSnapshotData {
+    pool_id: String,
+    token_a: String,
+    token_b: String,
+    reserves: Vec<Quantity>,
+    weights: Vec<u32>,
+    fee_bps: u32,
+}
+
 /// Holds the internal state for a single liquidity pool.
 #[derive(Debug, Clone)]
-struct PoolState {
-    token_pair: TokenPair,
-    sqrt_price: u128,
-    liquidity: u128,
-    tick: i32,
-    fee_bps: u32,
-    tick_map: HashMap<i32, TickInfo>,
+enum PoolState {
+    Clmm {
+        token_pair: TokenPair,
+        sqrt_price: u128,
+        liquidity: u128,
+        tick: i32,
+        fee_bps: u32,
+        tick_map: HashMap<i32, TickInfo>,
+    },
+    ConstantProduct {
+        token_pair: TokenPair,
+        reserve_x: Quantity,
+        reserve_y: Quantity,
+        fee_bps: u32,
+    },
+    StableSwap {
+        token_pair: TokenPair,
+        reserves: Vec<Quantity>,
+        amplification_factor: u128,
+        fee_bps: u32,
+    },
+    WeightedPool {
+        token_pair: TokenPair,
+        reserves: Vec<Quantity>,
+        weights: Vec<u32>,
+        fee_bps: u32,
+    },
 }
 
 // --- Adapter Implementations ---
@@ -79,7 +135,7 @@ impl DexAdapter for HyperionAdapter {
                 let mut raw = event.data.clone().into_bytes();
                 let snapshot: PoolSnapshotData = simd_from_slice(&mut raw)
                     .context("Failed to deserialize PoolSnapshotData with simd-json")?;
-                let state = PoolState {
+                let state = PoolState::Clmm {
                     token_pair: TokenPair {
                         token0: snapshot.token_a,
                         token1: snapshot.token_b,
@@ -101,28 +157,41 @@ impl DexAdapter for HyperionAdapter {
                     .context("Failed to deserialize SwapEventData with simd-json")?;
                 let pool_id = swap.pool_id.clone();
 
-                if let Some(mut pool_state) = self.pools.get_mut(&pool_id) {
-                    // First, update our internal state to reflect the post-swap reality.
-                    pool_state.sqrt_price = swap.sqrt_price;
-                    pool_state.liquidity = swap.liquidity;
-                    pool_state.tick = swap.tick;
+                if let Some(mut pool_state_guard) = self.pools.get_mut(&pool_id) {
+                    // Extract immutable data first
+                    let token_pair = pool_state_guard.token_pair().clone();
+                    let fee_bps = pool_state_guard.fee_bps();
+                    let tick_map = pool_state_guard.tick_map().clone();
 
-                    // Then, create the market update from the *new* state.
-                    let market_update = MarketUpdate {
-                        pool_address: pool_id.clone(),
-                        dex_name: self.id().to_string(),
-                        token_pair: pool_state.token_pair.clone(),
-                        sqrt_price: pool_state.sqrt_price,
-                        liquidity: pool_state.liquidity,
-                        tick: pool_state.tick as u32,
-                        fee_bps: pool_state.fee_bps,
-                        tick_map: pool_state.tick_map.clone(),
-                    };
+                    // Now, get a mutable reference to the inner PoolState enum variant
+                    if let PoolState::Clmm {
+                        sqrt_price,
+                        liquidity,
+                        tick,
+                        ..
+                    } = &mut *pool_state_guard
+                    {
+                        *sqrt_price = swap.sqrt_price;
+                        *liquidity = swap.liquidity;
+                        *tick = swap.tick;
 
-                    Ok(Some(market_update))
+                        let market_update = MarketUpdate::Clmm(ClmmMarketUpdate {
+                            pool_address: pool_id.clone(),
+                            dex_name: self.id().to_string(),
+                            token_pair,
+                            sqrt_price: *sqrt_price,
+                            liquidity: *liquidity,
+                            tick: *tick,
+                            fee_bps,
+                            tick_map,
+                        });
+
+                        Ok(Some(market_update))
+                    } else {
+                        eprintln!("Received swap for non-CLMM pool in HyperionAdapter");
+                        Ok(None)
+                    }
                 } else {
-                    // We received a swap for a pool we have no prior state for.
-                    // We cannot create a valid MarketUpdate without the liquidity distribution.
                     Ok(None)
                 }
             }
@@ -152,8 +221,6 @@ impl DexAdapter for ThalaAdapter {
     }
 
     fn parse_event(&self, event: &Event) -> Result<Option<MarketUpdate>> {
-        // The logic is assumed to be identical to Hyperion's for now.
-        // This can be customized if Thala's events differ.
         let event_name = event.type_str.split("::").last().unwrap_or("");
 
         match event_name {
@@ -161,7 +228,7 @@ impl DexAdapter for ThalaAdapter {
                 let mut raw = event.data.clone().into_bytes();
                 let snapshot: PoolSnapshotData = simd_from_slice(&mut raw)
                     .context("Failed to deserialize PoolSnapshotData for Thala with simd-json")?;
-                let state = PoolState {
+                let state = PoolState::Clmm {
                     token_pair: TokenPair {
                         token0: snapshot.token_a,
                         token1: snapshot.token_b,
@@ -181,25 +248,95 @@ impl DexAdapter for ThalaAdapter {
                     .context("Failed to deserialize SwapEventData for Thala with simd-json")?;
                 let pool_id = swap.pool_id.clone();
 
-                if let Some(mut pool_state) = self.pools.get_mut(&pool_id) {
-                    // First, update our internal state to reflect the post-swap reality.
-                    pool_state.sqrt_price = swap.sqrt_price;
-                    pool_state.liquidity = swap.liquidity;
-                    pool_state.tick = swap.tick;
+                if let Some(mut pool_state_guard) = self.pools.get_mut(&pool_id) {
+                    // Extract immutable data first
+                    let token_pair = pool_state_guard.token_pair().clone();
+                    let fee_bps = pool_state_guard.fee_bps();
+                    let tick_map = pool_state_guard.tick_map().clone();
 
-                    // Then, create the market update from the *new* state.
-                    let market_update = MarketUpdate {
-                        pool_address: pool_id.clone(),
-                        dex_name: self.id().to_string(),
-                        token_pair: pool_state.token_pair.clone(),
-                        sqrt_price: pool_state.sqrt_price,
-                        liquidity: pool_state.liquidity,
-                        tick: pool_state.tick as u32,
-                        fee_bps: pool_state.fee_bps,
-                        tick_map: pool_state.tick_map.clone(),
-                    };
+                    if let PoolState::Clmm {
+                        sqrt_price,
+                        liquidity,
+                        tick,
+                        ..
+                    } = &mut *pool_state_guard
+                    {
+                        *sqrt_price = swap.sqrt_price;
+                        *liquidity = swap.liquidity;
+                        *tick = swap.tick;
 
-                    Ok(Some(market_update))
+                        let market_update = MarketUpdate::Clmm(ClmmMarketUpdate {
+                            pool_address: pool_id.clone(),
+                            dex_name: self.id().to_string(),
+                            token_pair,
+                            sqrt_price: *sqrt_price,
+                            liquidity: *liquidity,
+                            tick: *tick,
+                            fee_bps,
+                            tick_map,
+                        });
+
+                        Ok(Some(market_update))
+                    } else {
+                        eprintln!("Received swap for non-CLMM pool in ThalaAdapter");
+                        Ok(None)
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+            // Thala Weighted Pool events
+            "WeightedPoolSnapshot" => {
+                let mut raw = event.data.clone().into_bytes();
+                let snapshot: WeightedPoolSnapshotData = simd_from_slice(&mut raw).context(
+                    "Failed to deserialize WeightedPoolSnapshotData for Thala with simd-json",
+                )?;
+                let state = PoolState::WeightedPool {
+                    token_pair: TokenPair {
+                        token0: snapshot.token_a,
+                        token1: snapshot.token_b,
+                    },
+                    reserves: snapshot.reserves,
+                    weights: snapshot.weights,
+                    fee_bps: snapshot.fee_bps,
+                };
+                self.pools.insert(snapshot.pool_id, state);
+                Ok(None)
+            }
+            "WeightedPoolSwap" => {
+                // Assuming WeightedPoolSwapEventData is similar to SwapEventData but for weighted pools
+                #[derive(Deserialize, Debug, Clone)]
+                struct WeightedPoolSwapEventData {
+                    pool_id: String,
+                    reserves: Vec<Quantity>,
+                }
+                let mut raw = event.data.clone().into_bytes();
+                let swap: WeightedPoolSwapEventData = simd_from_slice(&mut raw).context(
+                    "Failed to deserialize WeightedPoolSwapEventData for Thala with simd-json",
+                )?;
+                let pool_id = swap.pool_id.clone();
+
+                if let Some(mut pool_state_guard) = self.pools.get_mut(&pool_id) {
+                    let token_pair = pool_state_guard.token_pair().clone();
+                    let fee_bps = pool_state_guard.fee_bps();
+                    let weights = pool_state_guard.weights().clone();
+
+                    if let PoolState::WeightedPool { reserves, .. } = &mut *pool_state_guard {
+                        *reserves = swap.reserves;
+
+                        let market_update = MarketUpdate::WeightedPool(WeightedPoolMarketUpdate {
+                            pool_address: pool_id.clone(),
+                            dex_name: self.id().to_string(),
+                            token_pair,
+                            reserves: reserves.clone(),
+                            weights,
+                            fee_bps,
+                        });
+                        Ok(Some(market_update))
+                    } else {
+                        eprintln!("Received swap for non-WeightedPool in ThalaAdapter");
+                        Ok(None)
+                    }
                 } else {
                     Ok(None)
                 }
@@ -209,7 +346,18 @@ impl DexAdapter for ThalaAdapter {
     }
 }
 
-pub struct TappAdapter;
+#[derive(Default)]
+pub struct TappAdapter {
+    pools: Arc<DashMap<String, PoolState>>,
+}
+
+impl TappAdapter {
+    pub fn new() -> Self {
+        Self {
+            pools: Arc::new(DashMap::new()),
+        }
+    }
+}
 
 #[async_trait]
 impl DexAdapter for TappAdapter {
@@ -217,7 +365,229 @@ impl DexAdapter for TappAdapter {
         "tapp"
     }
 
-    fn parse_event(&self, _event: &Event) -> Result<Option<MarketUpdate>> {
-        unimplemented!()
+    fn parse_event(&self, event: &Event) -> Result<Option<MarketUpdate>> {
+        let event_name = event.type_str.split("::").last().unwrap_or("");
+
+        match event_name {
+            "PoolSnapshot" => {
+                let mut raw = event.data.clone().into_bytes();
+                let snapshot: PoolSnapshotData = simd_from_slice(&mut raw)
+                    .context("Failed to deserialize PoolSnapshotData for Tapp with simd-json")?;
+                let state = PoolState::Clmm {
+                    token_pair: TokenPair {
+                        token0: snapshot.token_a,
+                        token1: snapshot.token_b,
+                    },
+                    sqrt_price: snapshot.sqrt_price,
+                    liquidity: snapshot.liquidity,
+                    tick: snapshot.tick,
+                    fee_bps: snapshot.fee_rate as u32,
+                    tick_map: snapshot.tick_map,
+                };
+                self.pools.insert(snapshot.pool_id, state);
+                Ok(None)
+            }
+            "SwapEvent" | "SwapAfterEvent" => {
+                let mut raw = event.data.clone().into_bytes();
+                let swap: SwapEventData = simd_from_slice(&mut raw)
+                    .context("Failed to deserialize SwapEventData for Tapp with simd-json")?;
+                let pool_id = swap.pool_id.clone();
+
+                if let Some(mut pool_state) = self.pools.get_mut(&pool_id) {
+                    let token_pair = pool_state.token_pair().clone();
+                    let fee_bps = pool_state.fee_bps();
+                    let tick_map = pool_state.tick_map().clone();
+                    if let PoolState::Clmm {
+                        sqrt_price,
+                        liquidity,
+                        tick,
+                        ..
+                    } = &mut *pool_state
+                    {
+                        *sqrt_price = swap.sqrt_price;
+                        *liquidity = swap.liquidity;
+                        *tick = swap.tick;
+
+                        let market_update = MarketUpdate::Clmm(ClmmMarketUpdate {
+                            pool_address: pool_id.clone(),
+                            dex_name: self.id().to_string(),
+                            token_pair,
+                            sqrt_price: *sqrt_price,
+                            liquidity: *liquidity,
+                            tick: *tick,
+                            fee_bps,
+                            tick_map,
+                        });
+
+                        Ok(Some(market_update))
+                    } else {
+                        eprintln!("Received swap for non-CLMM pool in TappAdapter");
+                        Ok(None)
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+            // Assuming Tapp also has Constant Product pools
+            "AmmPoolSnapshot" => {
+                let mut raw = event.data.clone().into_bytes();
+                let snapshot: AmmPoolSnapshotData = simd_from_slice(&mut raw)
+                    .context("Failed to deserialize AmmPoolSnapshotData for Tapp with simd-json")?;
+                let state = PoolState::ConstantProduct {
+                    token_pair: TokenPair {
+                        token0: snapshot.token_a,
+                        token1: snapshot.token_b,
+                    },
+                    reserve_x: snapshot.reserve_x,
+                    reserve_y: snapshot.reserve_y,
+                    fee_bps: snapshot.fee_bps,
+                };
+                self.pools.insert(snapshot.pool_id, state);
+                Ok(None)
+            }
+            "AmmSwapEvent" => {
+                #[derive(Deserialize, Debug, Clone)]
+                struct AmmSwapEventData {
+                    pool_id: String,
+                    reserves: Vec<Quantity>,
+                }
+                let mut raw = event.data.clone().into_bytes();
+                let swap: AmmSwapEventData = simd_from_slice(&mut raw)
+                    .context("Failed to deserialize AmmSwapEventData for Tapp with simd-json")?;
+                let pool_id = swap.pool_id.clone();
+
+                if let Some(mut pool_state) = self.pools.get_mut(&pool_id) {
+                    let token_pair = pool_state.token_pair().clone();
+                    let fee_bps = pool_state.fee_bps();
+                    if let PoolState::ConstantProduct {
+                        reserve_x,
+                        reserve_y,
+                        ..
+                    } = &mut *pool_state
+                    {
+                        *reserve_x = swap.reserves[0];
+                        *reserve_y = swap.reserves[1];
+
+                        let market_update =
+                            MarketUpdate::ConstantProduct(ConstantProductMarketUpdate {
+                                pool_address: pool_id.clone(),
+                                dex_name: self.id().to_string(),
+                                token_pair,
+                                reserve_x: *reserve_x,
+                                reserve_y: *reserve_y,
+                                fee_bps,
+                            });
+                        Ok(Some(market_update))
+                    } else {
+                        eprintln!("Received swap for non-ConstantProduct pool in TappAdapter");
+                        Ok(None)
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+            // Assuming Tapp also has StableSwap pools
+            "StableSwapPoolSnapshot" => {
+                let mut raw = event.data.clone().into_bytes();
+                let snapshot: StableSwapPoolSnapshotData = simd_from_slice(&mut raw).context(
+                    "Failed to deserialize StableSwapPoolSnapshotData for Tapp with simd-json",
+                )?;
+                let state = PoolState::StableSwap {
+                    token_pair: TokenPair {
+                        token0: snapshot.token_a,
+                        token1: snapshot.token_b,
+                    },
+                    reserves: snapshot.reserves,
+                    amplification_factor: snapshot.amplification_factor,
+                    fee_bps: snapshot.fee_bps,
+                };
+                self.pools.insert(snapshot.pool_id, state);
+                Ok(None)
+            }
+            "StableSwapEvent" => {
+                #[derive(Deserialize, Debug, Clone)]
+                struct StableSwapEventData {
+                    pool_id: String,
+                    reserves: Vec<Quantity>,
+                }
+                let mut raw = event.data.clone().into_bytes();
+                let swap: StableSwapEventData = simd_from_slice(&mut raw)
+                    .context("Failed to deserialize StableSwapEventData for Tapp with simd-json")?;
+                let pool_id = swap.pool_id.clone();
+
+                if let Some(mut pool_state) = self.pools.get_mut(&pool_id) {
+                    let token_pair = pool_state.token_pair().clone();
+                    let fee_bps = pool_state.fee_bps();
+                    let amplification_factor = pool_state.amplification_factor().unwrap();
+                    if let PoolState::StableSwap { reserves, .. } = &mut *pool_state {
+                        *reserves = swap.reserves;
+
+                        let market_update = MarketUpdate::StableSwap(StableSwapMarketUpdate {
+                            pool_address: pool_id.clone(),
+                            dex_name: self.id().to_string(),
+                            token_pair,
+                            reserves: reserves.clone(),
+                            amplification_factor,
+                            fee_bps,
+                        });
+                        Ok(Some(market_update))
+                    } else {
+                        eprintln!("Received swap for non-StableSwap pool in TappAdapter");
+                        Ok(None)
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
+impl PoolState {
+    fn token_pair(&self) -> &TokenPair {
+        match self {
+            PoolState::Clmm { token_pair, .. } => token_pair,
+            PoolState::ConstantProduct { token_pair, .. } => token_pair,
+            PoolState::StableSwap { token_pair, .. } => token_pair,
+            PoolState::WeightedPool { token_pair, .. } => token_pair,
+        }
+    }
+
+    fn fee_bps(&self) -> u32 {
+        match self {
+            PoolState::Clmm { fee_bps, .. } => *fee_bps,
+            PoolState::ConstantProduct { fee_bps, .. } => *fee_bps,
+            PoolState::StableSwap { fee_bps, .. } => *fee_bps,
+            PoolState::WeightedPool { fee_bps, .. } => *fee_bps,
+        }
+    }
+
+    fn tick_map(&self) -> &HashMap<i32, TickInfo> {
+        if let PoolState::Clmm { tick_map, .. } = self {
+            tick_map
+        } else {
+            panic!("tick_map only available for Clmm pool state");
+        }
+    }
+
+    fn weights(&self) -> &Vec<u32> {
+        if let PoolState::WeightedPool { weights, .. } = self {
+            weights
+        } else {
+            panic!("weights only available for WeightedPool pool state");
+        }
+    }
+
+    fn amplification_factor(&self) -> Option<u128> {
+        if let PoolState::StableSwap {
+            amplification_factor,
+            ..
+        } = self
+        {
+            Some(*amplification_factor)
+        } else {
+            None
+        }
     }
 }

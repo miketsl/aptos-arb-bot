@@ -1,11 +1,11 @@
 use super::{ArbitrageStrategy, CrossDexConfig};
-use crate::graph::{Edge, PoolModel, PriceGraphView};
+use crate::graph::{Edge, PriceGraphView};
 use anyhow::Result;
 use async_trait::async_trait;
 use common::types::TradingPair;
 use common::types::{ArbitrageOpportunity, GraphView};
+use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
-use rust_decimal::MathematicalOps;
 
 #[derive(Clone)]
 pub struct CrossDexArbitrage {
@@ -27,8 +27,7 @@ impl ArbitrageStrategy for CrossDexArbitrage {
     fn required_graph_view(&self) -> GraphView {
         // This strategy needs to see all pools for a given pair to compare them.
         // The view creation logic will handle providing the right data.
-        // For now, we can specify a generic view. The filtering will happen
-        // during view creation based on what the strategy needs.
+        // For now, we can specify a generic view.
         GraphView::All
     }
 
@@ -74,84 +73,55 @@ impl ArbitrageStrategy for CrossDexArbitrage {
                         continue;
                     }
 
-                    // Compute optimal cross-DEX input via geometric mean of prices
-                    println!(
-                        "Cross-dex candidate: buy {} on {}, sell on {} via pools {} / {}",
-                        buy_edge.pair,
-                        buy_edge.exchange,
-                        sell_edge.exchange,
-                        buy_edge.pool_address,
-                        sell_edge.pool_address
-                    );
-                    if let (
-                        PoolModel::ConstantProduct {
-                            reserve_x: rx1,
-                            reserve_y: ry1,
-                            ..
-                        },
-                        PoolModel::ConstantProduct {
-                            reserve_x: rx2,
-                            reserve_y: ry2,
-                            ..
-                        },
-                    ) = (&buy_edge.model, &sell_edge.model)
-                    {
-                        // Constant-product optimum input for cross-DEX arbitrage
-                        println!(
-                            "Reserves => x1={}, y1={}, x2={}, y2={}",
-                            rx1.0, ry1.0, rx2.0, ry2.0
-                        );
-                        let radicand = rx1.0 * ry1.0 * rx2.0 * ry2.0;
-                        if let Some(root) = radicand.sqrt() {
-                            let numerator = root - (rx1.0 * rx2.0);
-                            if numerator <= Decimal::ZERO {
-                                continue;
-                            }
-                            let denominator = rx2.0 + ry1.0;
-                            if denominator == Decimal::ZERO {
-                                continue;
-                            }
-                            let optimal_in = numerator / denominator;
-                            if optimal_in <= Decimal::ZERO {
-                                continue;
-                            }
-                            let qty = common::types::Quantity(optimal_in);
-                            if let Some(mid) = buy_edge.quote(&qty, asset_x) {
-                                if let Some(out) = sell_edge.quote(&mid, asset_y) {
-                                    let profit = out.0 - optimal_in;
-                                    if profit > Decimal::ZERO {
-                                        // Human-readable arbitrage summary
-                                        println!(
-                                            "SWAP {} {} on {} -> get {} {}; SWAP {} {} on {} -> get {} {}; {}-{}=={} profit of {}",
-                                            optimal_in,
-                                            asset_x,
-                                            buy_edge.exchange,
-                                            mid.0,
-                                            asset_y,
-                                            mid.0,
-                                            asset_y,
-                                            sell_edge.exchange,
-                                            out.0,
-                                            asset_x,
-                                            out.0,
-                                            optimal_in,
-                                            profit,
-                                            asset_x,
-                                        );
-                                        opportunities.push(ArbitrageOpportunity {
-                                            id: uuid::Uuid::new_v4(),
-                                            strategy: self.name().to_string(),
-                                            path: vec![
-                                                buy_edge.to_serializable(),
-                                                sell_edge.to_serializable(),
-                                            ],
-                                            expected_profit: profit,
-                                            input_amount: optimal_in,
-                                            gas_estimate: 0,
-                                            block_number,
-                                            timestamp: chrono::Utc::now(),
-                                        });
-                                    }
+                    // Compute optimal cross-DEX input by trying a few input amounts
+                    // This is a simplified approach for multi-pool type arbitrage.
+                    // A more sophisticated approach would involve numerical optimization.
+                    let test_input_amounts = vec![
+                        Decimal::from_f64(0.1).unwrap(),
+                        Decimal::from_f64(1.0).unwrap(),
+                        Decimal::from_f64(10.0).unwrap(),
+                        Decimal::from_f64(100.0).unwrap(),
+                        Decimal::from_f64(1000.0).unwrap(),
+                    ];
+
+                    for &optimal_in_val in &test_input_amounts {
+                        let optimal_in = common::types::Quantity(optimal_in_val);
+
+                        if let Some(mid) = buy_edge.quote(&optimal_in, asset_x) {
+                            if let Some(out) = sell_edge.quote(&mid, asset_y) {
+                                let profit = out.0 - optimal_in.0;
+                                if profit > Decimal::ZERO {
+                                    // Human-readable arbitrage summary
+                                    println!(
+                                        "SWAP {} {} on {} -> get {} {}; SWAP {} {} on {} -> get {} {}; {}-{}=={} profit of {}",
+                                        optimal_in.0,
+                                        asset_x,
+                                        buy_edge.exchange,
+                                        mid.0,
+                                        asset_y,
+                                        mid.0,
+                                        asset_y,
+                                        sell_edge.exchange,
+                                        out.0,
+                                        asset_x,
+                                        out.0,
+                                        optimal_in.0,
+                                        profit,
+                                        asset_x,
+                                    );
+                                    opportunities.push(ArbitrageOpportunity {
+                                        id: uuid::Uuid::new_v4(),
+                                        strategy: self.name().to_string(),
+                                        path: vec![
+                                            buy_edge.to_serializable(),
+                                            sell_edge.to_serializable(),
+                                        ],
+                                        expected_profit: profit,
+                                        input_amount: optimal_in.0,
+                                        gas_estimate: 0,
+                                        block_number,
+                                        timestamp: chrono::Utc::now(),
+                                    });
                                 }
                             }
                         }

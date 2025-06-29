@@ -1,5 +1,5 @@
 use chrono::Utc;
-use common::types::{DetectorMessage, MarketUpdate, TokenPair};
+use common::types::{ClmmMarketUpdate, DetectorMessage, MarketUpdate, TokenPair};
 use detector::service::DetectorService;
 use detector::strategies::{CrossDexConfig, StrategyConfig};
 use std::{collections::HashMap, time::Duration};
@@ -10,18 +10,20 @@ use tokio::sync::mpsc;
 #[tokio::test]
 async fn integration_cross_dex_detection() {
     // Single-tick CLMM pools (empty tick_map) to drive ConstantProduct edges.
-    let mk_update = |dex: &str, t0: &str, t1: &str, sqrt_q64: u128| MarketUpdate {
-        pool_address: format!("{}-{}-{}", dex, t0, t1),
-        dex_name: dex.to_string(),
-        token_pair: TokenPair {
-            token0: t0.to_string(),
-            token1: t1.to_string(),
-        },
-        sqrt_price: sqrt_q64,
-        liquidity: 1_000_000,
-        tick: 0,
-        fee_bps: 0,
-        tick_map: HashMap::new(),
+    let mk_update = |dex: &str, t0: &str, t1: &str, sqrt_q64: u128| {
+        MarketUpdate::Clmm(ClmmMarketUpdate {
+            pool_address: format!("{}-{}-{}", dex, t0, t1),
+            dex_name: dex.to_string(),
+            token_pair: TokenPair {
+                token0: t0.to_string(),
+                token1: t1.to_string(),
+            },
+            sqrt_price: sqrt_q64,
+            liquidity: 1_000_000,
+            tick: 0,
+            fee_bps: 0,
+            tick_map: HashMap::new(),
+        })
     };
 
     // Desired price ratios:

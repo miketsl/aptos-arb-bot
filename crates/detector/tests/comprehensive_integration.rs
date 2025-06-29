@@ -1,5 +1,5 @@
 use chrono::Utc;
-use common::types::{DetectorMessage, MarketUpdate, TokenPair, TickInfo};
+use common::types::{ClmmMarketUpdate, DetectorMessage, MarketUpdate, TickInfo, TokenPair};
 use detector::service::DetectorService;
 use detector::strategies::{CrossDexConfig, MultiHopConfig, StrategyConfig, TriangularConfig};
 use std::{collections::HashMap, time::Duration};
@@ -15,7 +15,7 @@ fn create_market_update(
     liquidity: u128,
     fee_bps: u32,
 ) -> MarketUpdate {
-    MarketUpdate {
+    MarketUpdate::Clmm(ClmmMarketUpdate {
         pool_address: format!("{}-{}-{}", dex, token0, token1),
         dex_name: dex.to_string(),
         token_pair: TokenPair {
@@ -27,7 +27,7 @@ fn create_market_update(
         tick: 0,
         fee_bps,
         tick_map: HashMap::new(),
-    }
+    })
 }
 
 /// Helper to create concentrated liquidity market update
@@ -53,7 +53,7 @@ fn create_clmm_update(
         })
         .collect();
 
-    MarketUpdate {
+    MarketUpdate::Clmm(ClmmMarketUpdate {
         pool_address: format!("{}-{}-{}", dex, token0, token1),
         dex_name: dex.to_string(),
         token_pair: TokenPair {
@@ -65,7 +65,7 @@ fn create_clmm_update(
         tick: 0,
         fee_bps,
         tick_map,
-    }
+    })
 }
 
 /// Test multiple strategies running simultaneously
@@ -98,12 +98,10 @@ async fn test_multi_strategy_detection() {
         // Cross-DEX opportunity: APT/USDC on different DEXes
         create_market_update("PancakeSwap", "APT", "USDC", 1u128 << 64, 1_000_000, 25), // 1:1 ratio
         create_market_update("Thala", "APT", "USDC", 2u128 << 64, 1_000_000, 30), // 2:1 ratio (arbitrage!)
-        
         // Triangular opportunity: APT -> ETH -> USDC -> APT
         create_market_update("PancakeSwap", "APT", "ETH", 1u128 << 63, 500_000, 25), // APT:ETH = 0.5
         create_market_update("PancakeSwap", "ETH", "USDC", 4u128 << 64, 500_000, 25), // ETH:USDC = 4
         create_market_update("PancakeSwap", "USDC", "APT", 1u128 << 64, 500_000, 25), // USDC:APT = 1
-        
         // Multi-hop opportunity across DEXes
         create_market_update("Thala", "APT", "ETH", 1u128 << 63, 300_000, 30),
         create_market_update("Thala", "ETH", "BTC", 1u128 << 62, 300_000, 30), // ETH:BTC = 0.25
@@ -120,7 +118,9 @@ async fn test_multi_strategy_detection() {
 
     // Send all market updates
     for update in updates {
-        tx.send(DetectorMessage::MarketUpdate(update)).await.unwrap();
+        tx.send(DetectorMessage::MarketUpdate(update))
+            .await
+            .unwrap();
     }
 
     // Send block end to trigger detection
@@ -131,7 +131,7 @@ async fn test_multi_strategy_detection() {
     // Collect opportunities with timeout
     let mut opportunities = Vec::new();
     let timeout_duration = Duration::from_millis(500);
-    
+
     while let Ok(result) = timeout(timeout_duration, op_rx.recv()).await {
         if let Some(opp) = result {
             opportunities.push(opp);
@@ -142,14 +142,19 @@ async fn test_multi_strategy_detection() {
 
     // Should detect at least one opportunity
     assert!(
-        opportunities.len() >= 1,
+        !opportunities.is_empty(),
         "Expected at least 1 opportunity, got {}",
         opportunities.len()
     );
 
     // Print detected opportunities for debugging
     for (i, opp) in opportunities.iter().enumerate() {
-        println!("Opportunity {}: strategy={}, profit={}", i + 1, opp.strategy, opp.expected_profit);
+        println!(
+            "Opportunity {}: strategy={}, profit={}",
+            i + 1,
+            opp.strategy,
+            opp.expected_profit
+        );
     }
 
     // Verify we have opportunities (may be from same or different strategies)
@@ -157,7 +162,7 @@ async fn test_multi_strategy_detection() {
         .iter()
         .map(|opp| opp.strategy.as_str())
         .collect();
-    
+
     println!("Strategies that found opportunities: {:?}", strategy_names);
     assert!(
         !strategy_names.is_empty(),
@@ -192,34 +197,26 @@ async fn test_high_frequency_updates() {
         // 10 updates per block with slight price variations
         for i in 0..10 {
             let price_variation = (1u128 << 64) + (i * 1000); // Slight price changes
-            let update = create_market_update(
-                "DEX1",
-                "APT",
-                "USDC",
-                price_variation,
-                1_000_000,
-                25,
-            );
-            tx.send(DetectorMessage::MarketUpdate(update)).await.unwrap();
+            let update =
+                create_market_update("DEX1", "APT", "USDC", price_variation, 1_000_000, 25);
+            tx.send(DetectorMessage::MarketUpdate(update))
+                .await
+                .unwrap();
 
             // Competing DEX with different price
             let competing_price = (2u128 << 64) - (i * 500);
-            let competing_update = create_market_update(
-                "DEX2",
-                "APT",
-                "USDC",
-                competing_price,
-                1_000_000,
-                30,
-            );
+            let competing_update =
+                create_market_update("DEX2", "APT", "USDC", competing_price, 1_000_000, 30);
             tx.send(DetectorMessage::MarketUpdate(competing_update))
                 .await
                 .unwrap();
         }
 
-        tx.send(DetectorMessage::BlockEnd { block_number: block })
-            .await
-            .unwrap();
+        tx.send(DetectorMessage::BlockEnd {
+            block_number: block,
+        })
+        .await
+        .unwrap();
     }
 
     // Allow processing time
@@ -233,7 +230,10 @@ async fn test_high_frequency_updates() {
 
     // High-frequency updates may or may not create arbitrage opportunities
     // The test verifies that the service handles the load without crashing
-    println!("High-frequency test completed. Opportunities detected: {}", opportunity_count);
+    println!(
+        "High-frequency test completed. Opportunities detected: {}",
+        opportunity_count
+    );
 
     drop(tx);
     handle.await.unwrap();
@@ -294,7 +294,9 @@ async fn test_clmm_integration() {
     .unwrap();
 
     for update in updates {
-        tx.send(DetectorMessage::MarketUpdate(update)).await.unwrap();
+        tx.send(DetectorMessage::MarketUpdate(update))
+            .await
+            .unwrap();
     }
 
     tx.send(DetectorMessage::BlockEnd { block_number: 1 })
@@ -311,7 +313,10 @@ async fn test_clmm_integration() {
 
     // Note: We don't assert opportunity detection here since CLMM pricing is complex
     // The test verifies that CLMM updates are processed without errors
-    println!("CLMM integration test completed, opportunity detected: {}", opportunity_received);
+    println!(
+        "CLMM integration test completed, opportunity detected: {}",
+        opportunity_received
+    );
 
     drop(tx);
     handle.await.unwrap();
@@ -338,7 +343,7 @@ async fn test_error_handling() {
     .unwrap();
 
     // Invalid token addresses (should be handled by transform layer)
-    let invalid_update = MarketUpdate {
+    let invalid_update = MarketUpdate::Clmm(ClmmMarketUpdate {
         pool_address: "invalid_pool".to_string(),
         dex_name: "TestDEX".to_string(),
         token_pair: TokenPair {
@@ -350,7 +355,7 @@ async fn test_error_handling() {
         tick: 0,
         fee_bps: 10000, // Very high fee
         tick_map: HashMap::new(),
-    };
+    });
 
     // Service should handle this gracefully
     tx.send(DetectorMessage::MarketUpdate(invalid_update))
@@ -403,7 +408,7 @@ async fn test_graph_pruning() {
         for i in 0..20 {
             let token_a = format!("TOKEN_{}", i);
             let token_b = format!("TOKEN_{}", i + 1);
-            
+
             let update = create_market_update(
                 "DEX1",
                 &token_a,
@@ -412,12 +417,16 @@ async fn test_graph_pruning() {
                 if i < 10 { 1_000_000 } else { 100 }, // Some with low liquidity
                 25,
             );
-            tx.send(DetectorMessage::MarketUpdate(update)).await.unwrap();
+            tx.send(DetectorMessage::MarketUpdate(update))
+                .await
+                .unwrap();
         }
 
-        tx.send(DetectorMessage::BlockEnd { block_number: block })
-            .await
-            .unwrap();
+        tx.send(DetectorMessage::BlockEnd {
+            block_number: block,
+        })
+        .await
+        .unwrap();
 
         // Allow pruning to occur
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -425,7 +434,7 @@ async fn test_graph_pruning() {
 
     // Service should handle pruning without issues
     tokio::time::sleep(Duration::from_millis(100)).await;
-    
+
     let is_running = !handle.is_finished();
     assert!(is_running, "Service should continue running after pruning");
 

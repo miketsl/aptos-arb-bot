@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
 use clap::Parser;
-use common::types::{DetectorMessage, MarketUpdate, TokenPair};
+use common::types::{ClmmMarketUpdate, DetectorMessage, MarketUpdate, TokenPair};
 use config::Config;
 use detector::DetectorService;
 use dex_adapter_trait::DexAdapter;
@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
         let adapter: Arc<dyn DexAdapter> = match dex_config.name.as_str() {
             "Hyperion" => Arc::new(HyperionAdapter::new()),
             "ThalaSwap" => Arc::new(ThalaAdapter::new()),
-            "Tapp" => Arc::new(TappAdapter),
+            "Tapp" => Arc::new(TappAdapter::new()),
             _ => {
                 anyhow::bail!("Unknown adapter: {}", dex_config.name);
             }
@@ -92,19 +92,21 @@ async fn main() -> Result<()> {
 
             info!("Sending dummy MarketUpdate for block {}", block_number);
             test_sender
-                .send(DetectorMessage::MarketUpdate(MarketUpdate {
-                    pool_address: "0x123".to_string(),
-                    dex_name: "DummyDex".to_string(),
-                    token_pair: TokenPair {
-                        token0: "APT".to_string(),
-                        token1: "USDC".to_string(),
+                .send(DetectorMessage::MarketUpdate(MarketUpdate::Clmm(
+                    ClmmMarketUpdate {
+                        pool_address: "0x123".to_string(),
+                        dex_name: "DummyDex".to_string(),
+                        token_pair: TokenPair {
+                            token0: "APT".to_string(),
+                            token1: "USDC".to_string(),
+                        },
+                        sqrt_price: 0,
+                        liquidity: 0,
+                        tick: 0,
+                        fee_bps: 0,
+                        tick_map: HashMap::new(),
                     },
-                    sqrt_price: 0,
-                    liquidity: 0,
-                    tick: 0,
-                    fee_bps: 0,
-                    tick_map: HashMap::new(),
-                }))
+                )))
                 .await
                 .unwrap();
 
