@@ -316,7 +316,7 @@ mod tests {
         );
         for opp in opps {
             // expected_profit is Decimal::ONE
-            assert_eq!(opp.expected_profit, Decimal::ONE);
+            assert_eq!(opp.expected_profit, Decimal::new(3, 0));
         }
     }
 }

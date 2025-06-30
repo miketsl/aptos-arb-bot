@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 fn sqrt_price_to_price(sqrt_price: u128) -> Decimal {
-    let price_q64 = Decimal::from(sqrt_price) / Decimal::from(2).powu(32);
+    let price_q64 = Decimal::from(sqrt_price) / Decimal::from(2u128.pow(64));
     price_q64 * price_q64
 }
 
