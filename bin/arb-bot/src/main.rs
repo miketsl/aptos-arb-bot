@@ -34,9 +34,9 @@ async fn main() -> Result<()> {
     let mut adapters: HashMap<String, Arc<dyn DexAdapter>> = HashMap::new();
     for dex_config in &config.market_data_config.dexs {
         let adapter: Arc<dyn DexAdapter> = match dex_config.name.as_str() {
-            "Hyperion" => Arc::new(HyperionAdapter::new()),
-            "ThalaSwap" => Arc::new(ThalaAdapter::new()),
-            "Tapp" => Arc::new(TappAdapter::new()),
+            "Hyperion" => Arc::new(HyperionAdapter::default()),
+            "ThalaSwap" => Arc::new(ThalaAdapter::default()),
+            "Tapp" => Arc::new(TappAdapter::default()),
             _ => {
                 anyhow::bail!("Unknown adapter: {}", dex_config.name);
             }

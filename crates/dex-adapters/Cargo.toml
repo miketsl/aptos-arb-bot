@@ -12,3 +12,7 @@ dex-adapter-trait = { path = "../dex-adapter-trait" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 simd-json = { version = "0.15.1", features = ["serde_impl"] }
+
+[dev-dependencies]
+rust_decimal = "1.32"
+rust_decimal_macros = "1.32"
