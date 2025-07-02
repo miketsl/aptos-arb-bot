@@ -82,7 +82,6 @@ impl IsRiskManager for ConservativeRiskManager {
 mod tests {
     use super::*;
     use common::types::{Asset, SerializableEdge, TradingPair};
-    use detector::exchange_const::Exchange;
     use rust_decimal_macros::dec;
     use std::str::FromStr;
 
@@ -97,7 +96,7 @@ mod tests {
                     asset_x: Asset::from_str("USDC").unwrap(),
                     asset_y: Asset::from_str("APT").unwrap(),
                 },
-                exchange: Exchange::Tapp.to_string(),
+                exchange: "tapp".to_string(),
                 pool_address: "0x1".to_string(),
                 liquidity: dec!(10000),
                 fee_bps: 30,

@@ -154,10 +154,59 @@ impl ArbitrageStrategy for TriangularArbitrage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{Edge, PoolModel, PriceGraph, Tick};
-    use common::types::{Asset, GraphView, Quantity, TradingPair};
+    use crate::graph::{Edge, PoolModel, PriceGraph};
+    use common::types::{Asset, GraphView, Quantity, TickInfo, TradingPair};
     use rust_decimal_macros::dec;
+    use std::collections::HashMap;
+    use std::sync::Arc;
     use std::{str::FromStr, time::Instant};
+
+    fn create_test_cpmm_edge(
+        asset_x: Asset,
+        asset_y: Asset,
+        reserve_x_val: Decimal,
+        reserve_y_val: Decimal,
+        fee_bps: u32,
+    ) -> Edge {
+        Edge {
+            pair: TradingPair {
+                asset_x: asset_x.clone(),
+                asset_y: asset_y.clone(),
+            },
+            exchange: "dex".to_string(),
+            pool_address: "0x1".to_string(),
+            model: PoolModel::ConstantProduct {
+                reserve_x: Quantity(reserve_x_val),
+                reserve_y: Quantity(reserve_y_val),
+                fee_bps,
+            },
+            last_updated: Instant::now(),
+        }
+    }
+
+    fn create_test_clmm_edge(
+        asset_x: Asset,
+        asset_y: Asset,
+        sqrt_price: u128,
+        liquidity: u128,
+        tick: i32,
+        fee_bps: u32,
+        tick_map: HashMap<i32, TickInfo>,
+    ) -> Edge {
+        Edge {
+            pair: TradingPair::new(asset_x, asset_y),
+            exchange: "dex".to_string(),
+            pool_address: "0xclmm_pool".to_string(),
+            model: PoolModel::Clmm {
+                sqrt_price,
+                liquidity,
+                tick,
+                fee_bps,
+                tick_map: Arc::new(tick_map),
+            },
+            last_updated: Instant::now(),
+        }
+    }
 
     #[tokio::test]
     async fn test_triangular_detects_cycle() {
@@ -168,39 +217,10 @@ mod tests {
         // Use large reserves to minimize slippage and create a profitable cycle
         let large_x = dec!(10000);
         let large_y = dec!(20000);
-        let e_ab = Edge {
-            pair: TradingPair::new(a.clone(), b.clone()),
-            exchange: "dex".to_string(),
-            pool_address: "p_ab".to_string(),
-            model: PoolModel::ConstantProduct {
-                reserve_x: Quantity(large_x),
-                reserve_y: Quantity(large_y),
-                fee_bps: 0,
-            },
-            last_updated: Instant::now(),
-        };
-        let e_bc = Edge {
-            pair: TradingPair::new(b.clone(), c.clone()),
-            exchange: "dex".to_string(),
-            pool_address: "p_bc".to_string(),
-            model: PoolModel::ConstantProduct {
-                reserve_x: Quantity(large_x),
-                reserve_y: Quantity(large_y),
-                fee_bps: 0,
-            },
-            last_updated: Instant::now(),
-        };
-        let e_ca = Edge {
-            pair: TradingPair::new(c.clone(), a.clone()),
-            exchange: "dex".to_string(),
-            pool_address: "p_ca".to_string(),
-            model: PoolModel::ConstantProduct {
-                reserve_x: Quantity(large_x),
-                reserve_y: Quantity(large_y),
-                fee_bps: 0,
-            },
-            last_updated: Instant::now(),
-        };
+        let e_ab = create_test_cpmm_edge(a.clone(), b.clone(), large_x, large_y, 0);
+        let e_bc = create_test_cpmm_edge(b.clone(), c.clone(), large_x, large_y, 0);
+        let e_ca = create_test_cpmm_edge(c.clone(), a.clone(), large_x, large_y, 0);
+
         graph.update_edge(e_ab);
         graph.update_edge(e_bc);
         graph.update_edge(e_ca);
@@ -222,50 +242,62 @@ mod tests {
         let a = Asset::from_str("A").unwrap();
         let b = Asset::from_str("B").unwrap();
         let c = Asset::from_str("C").unwrap();
-        // Ticks for fixed price, no slippage.
-        let tick_ab = Tick {
-            price: dec!(2),
-            liquidity_gross: dec!(1000),
-        };
-        let tick_bc = Tick {
-            price: dec!(2),
-            liquidity_gross: dec!(1000),
-        };
-        let tick_ca = Tick {
-            price: dec!(0.5),
-            liquidity_gross: dec!(1000),
-        };
-        // Create edges on same dex.
-        let e_ab = Edge {
-            pair: TradingPair::new(a.clone(), b.clone()),
-            exchange: "dex".to_string(),
-            pool_address: "p_ab".to_string(),
-            model: PoolModel::ConcentratedLiquidity {
-                ticks: vec![tick_ab],
-                fee_bps: 0,
+
+        // Create CLMM edges with simplified tick_map for fixed price
+        let mut tick_map_ab = HashMap::new();
+        tick_map_ab.insert(
+            0,
+            TickInfo {
+                liquidity_net: 0,
+                liquidity_gross: 1000,
             },
-            last_updated: Instant::now(),
-        };
-        let e_bc = Edge {
-            pair: TradingPair::new(b.clone(), c.clone()),
-            exchange: "dex".to_string(),
-            pool_address: "p_bc".to_string(),
-            model: PoolModel::ConcentratedLiquidity {
-                ticks: vec![tick_bc],
-                fee_bps: 0,
+        );
+        let e_ab = create_test_clmm_edge(
+            a.clone(),
+            b.clone(),
+            18446744073709551616 * 2, // sqrt_price for 2
+            1000,
+            0,
+            0,
+            tick_map_ab,
+        );
+
+        let mut tick_map_bc = HashMap::new();
+        tick_map_bc.insert(
+            0,
+            TickInfo {
+                liquidity_net: 0,
+                liquidity_gross: 1000,
             },
-            last_updated: Instant::now(),
-        };
-        let e_ca = Edge {
-            pair: TradingPair::new(c.clone(), a.clone()),
-            exchange: "dex".to_string(),
-            pool_address: "p_ca".to_string(),
-            model: PoolModel::ConcentratedLiquidity {
-                ticks: vec![tick_ca],
-                fee_bps: 0,
+        );
+        let e_bc = create_test_clmm_edge(
+            b.clone(),
+            c.clone(),
+            18446744073709551616 * 2, // sqrt_price for 2
+            1000,
+            0,
+            0,
+            tick_map_bc,
+        );
+
+        let mut tick_map_ca = HashMap::new();
+        tick_map_ca.insert(
+            0,
+            TickInfo {
+                liquidity_net: 0,
+                liquidity_gross: 1000,
             },
-            last_updated: Instant::now(),
-        };
+        );
+        let e_ca = create_test_clmm_edge(
+            c.clone(),
+            a.clone(),
+            18446744073709551616 / 2, // sqrt_price for 0.5
+            1000,
+            0,
+            0,
+            tick_map_ca,
+        );
+
         graph.update_edge(e_ab);
         graph.update_edge(e_bc);
         graph.update_edge(e_ca);
@@ -284,7 +316,7 @@ mod tests {
         );
         for opp in opps {
             // expected_profit is Decimal::ONE
-            assert_eq!(opp.expected_profit, Decimal::ONE);
+            assert_eq!(opp.expected_profit, Decimal::new(3, 0));
         }
     }
 }

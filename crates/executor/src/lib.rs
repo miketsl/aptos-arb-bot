@@ -194,7 +194,10 @@ impl IsExecutor for TradeExecutor<String> {
         );
 
         if opportunity.path.is_empty() {
-            anyhow::bail!("Cannot execute opportunity {}: empty arbitrage path", opportunity.id);
+            anyhow::bail!(
+                "Cannot execute opportunity {}: empty arbitrage path",
+                opportunity.id
+            );
         }
 
         // This simulation assumes the `ArbitrageOpportunity` and `Edge` structs
@@ -214,14 +217,22 @@ impl IsExecutor for TradeExecutor<String> {
             // For now, we assume `Buy` for simulation purposes.
             let order = Order {
                 id: format!("{}-{}", opportunity.id, i),
-                pair: common::types::AssetPair::new(edge.from_token.clone(), edge.to_token.clone()),
+                pair: common::types::AssetPair::new(
+                    edge.pair.asset_x.clone(),
+                    edge.pair.asset_y.clone(),
+                ),
                 order_type: common::types::OrderType::Buy, // Placeholder
                 price: placeholder_price,
                 quantity: common::types::Quantity(current_quantity),
-                exchange: edge.dex_name.clone(),
+                exchange: edge.exchange.clone(),
             };
 
-            log::info!("Executing step {}/{}: {:?}", i + 1, opportunity.path.len(), order);
+            log::info!(
+                "Executing step {}/{}: {:?}",
+                i + 1,
+                opportunity.path.len(),
+                order
+            );
             let result = self.simulate_onchain_trade(&order).await;
 
             if result.status != TradeStatus::Filled {
@@ -231,7 +242,10 @@ impl IsExecutor for TradeExecutor<String> {
             current_quantity = result.filled_quantity.0;
         }
 
-        log::info!("Successfully executed all steps for opportunity {}", opportunity.id);
+        log::info!(
+            "Successfully executed all steps for opportunity {}",
+            opportunity.id
+        );
         Ok(())
     }
 }

@@ -1,8 +1,12 @@
+use common::types::TickInfo;
 use common::types::{Asset, Quantity, TradingPair};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
+pub mod pool_math;
 pub mod state;
 
 pub use state::{PriceGraph, PriceGraphView};
@@ -23,28 +27,36 @@ pub enum PoolModel {
     ConstantProduct {
         reserve_x: Quantity,
         reserve_y: Quantity,
-        fee_bps: u16,
+        fee_bps: u32,
     },
-    ConcentratedLiquidity {
-        ticks: Vec<Tick>,
-        fee_bps: u16,
+    Clmm {
+        sqrt_price: u128,
+        liquidity: u128,
+        tick: i32,
+        fee_bps: u32,
+        tick_map: Arc<HashMap<i32, TickInfo>>,
+    },
+    StableSwap {
+        reserves: Vec<Quantity>,
+        amplification_factor: u128,
+        fee_bps: u32,
+    },
+    WeightedPool {
+        reserves: Vec<Quantity>,
+        weights: Vec<u32>,
+        fee_bps: u32,
     },
 }
 
 impl PoolModel {
-    pub fn fee_bps(&self) -> u16 {
+    pub fn fee_bps(&self) -> u32 {
         match self {
             PoolModel::ConstantProduct { fee_bps, .. } => *fee_bps,
-            PoolModel::ConcentratedLiquidity { fee_bps, .. } => *fee_bps,
+            PoolModel::Clmm { fee_bps, .. } => *fee_bps,
+            PoolModel::StableSwap { fee_bps, .. } => *fee_bps,
+            PoolModel::WeightedPool { fee_bps, .. } => *fee_bps,
         }
     }
-}
-
-/// Represents a tick in a concentrated liquidity pool.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Tick {
-    pub price: Decimal,
-    pub liquidity_gross: Decimal,
 }
 
 /// Represents an edge in the price graph, corresponding to a specific swap direction in a pool.
@@ -78,7 +90,7 @@ impl Edge {
             exchange: self.exchange.clone(),
             pool_address: self.pool_address.clone(),
             liquidity: Default::default(), // Placeholder
-            fee_bps: self.model.fee_bps() as u32,
+            fee_bps: self.model.fee_bps(),
             last_updated: chrono::Utc::now(), // Placeholder
             last_opportunity: None,
             opportunity_count: 0,
@@ -91,97 +103,59 @@ impl Edge {
         if *asset_in != self.pair.asset_x {
             return None;
         }
+
+        let fee_decimal =
+            Decimal::from_u32(self.model.fee_bps()).unwrap_or_default() / Decimal::new(10000, 0);
+        let amount_in_after_fee = amount_in.0 * (Decimal::ONE - fee_decimal);
+
+        if amount_in_after_fee <= Decimal::ZERO {
+            return None;
+        }
+
         match &self.model {
             PoolModel::ConstantProduct {
                 reserve_x,
                 reserve_y,
-                fee_bps,
+                .. // fee_bps is handled above
             } => {
-                // For tuple struct Quantity, we can't check asset directly
-                // The caller must ensure the asset matches
-
-                if reserve_x.0.is_zero() || reserve_y.0.is_zero() || amount_in.0.is_zero() {
+                if reserve_x.0.is_zero() || reserve_y.0.is_zero() {
                     return None;
                 }
 
-                let amount_in_val = amount_in.0;
-                let reserve_x_val = reserve_x.0;
-                let reserve_y_val = reserve_y.0;
-
-                let fee_decimal =
-                    Decimal::from_u16(*fee_bps).unwrap_or_default() / Decimal::new(10000, 0);
-                let amount_in_after_fee = amount_in_val * (Decimal::ONE - fee_decimal);
-
-                // Classic CPMM: (x + dx_eff) * (y - dy) = x * y
-                // dy = y * dx_eff / (x + dx_eff)
                 let amount_out_val =
-                    (reserve_y_val * amount_in_after_fee) / (reserve_x_val + amount_in_after_fee);
+                    (reserve_y.0 * amount_in_after_fee) / (reserve_x.0 + amount_in_after_fee);
 
                 if amount_out_val.is_sign_negative()
                     || amount_out_val.is_zero()
-                    || amount_out_val > reserve_y_val
+                    || amount_out_val > reserve_y.0
                 {
                     return None; // Not enough liquidity or invalid amount
                 }
                 Some(Quantity(amount_out_val))
             }
-            PoolModel::ConcentratedLiquidity { ticks, fee_bps } => {
-                // Simplified CLMM Quoting Logic (Order-Book Style)
-                // Assumptions:
-                // 1. `ticks` are discrete price levels.
-                // 2. `Tick::price` is `asset_y / asset_x` (output per input).
-                // 3. `Tick::liquidity_gross` is the amount of `asset_x` available at that price.
-                // 4. Ticks are sorted to consume best prices first.
-                // 5. Fees are applied on input.
-
-                if amount_in.0.is_zero() {
-                    return None;
-                }
-
-                let fee_decimal =
-                    Decimal::from_u16(*fee_bps).unwrap_or_default() / Decimal::new(10000, 0);
-                let amount_in_after_fee = amount_in.0 * (Decimal::ONE - fee_decimal);
-
-                if amount_in_after_fee <= Decimal::ZERO {
-                    return None;
-                }
-
-                let mut remaining_to_swap = amount_in_after_fee;
-                let mut total_output_asset_y = Decimal::ZERO;
-
-                // Sort ticks by price descending to get the best rate first
-                // (more asset_y per asset_x)
-                let mut sorted_ticks = ticks.clone();
-                sorted_ticks.sort_by(|a, b| {
-                    b.price
-                        .partial_cmp(&a.price)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
-
-                for tick in sorted_ticks {
-                    if remaining_to_swap <= Decimal::ZERO {
-                        break;
-                    }
-                    // Ensure price and liquidity are valid
-                    if tick.price <= Decimal::ZERO || tick.liquidity_gross <= Decimal::ZERO {
-                        continue;
-                    }
-
-                    // Amount of asset_x that can be swapped at this tick's price
-                    let swappable_asset_x_at_tick = remaining_to_swap.min(tick.liquidity_gross);
-
-                    // Calculate asset_y output from this tick
-                    total_output_asset_y += swappable_asset_x_at_tick * tick.price;
-                    remaining_to_swap -= swappable_asset_x_at_tick;
-                }
-
-                if total_output_asset_y > Decimal::ZERO {
-                    Some(Quantity(total_output_asset_y))
-                } else {
-                    // No liquidity available or input amount too small
-                    None
-                }
-            }
+            PoolModel::Clmm {
+                sqrt_price,
+                liquidity,
+                tick,
+                tick_map,
+                .. // fee_bps is handled above
+            } => pool_math::quote_clmm(
+                amount_in_after_fee,
+                *sqrt_price,
+                *liquidity,
+                *tick,
+                tick_map.clone(),
+            ),
+            PoolModel::StableSwap {
+                reserves,
+                amplification_factor,
+                .. // fee_bps is handled above
+            } => pool_math::quote_stableswap(amount_in_after_fee, reserves, *amplification_factor),
+            PoolModel::WeightedPool {
+                reserves,
+                weights,
+                .. // fee_bps is handled above
+            } => pool_math::quote_weighted(amount_in_after_fee, reserves, weights),
         }
     }
 }
@@ -189,9 +163,9 @@ impl Edge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // use crate::exchange_const::Exchange; // no longer needed; use string identifiers
-    use common::types::{Asset, Quantity, TradingPair};
+    use common::types::{Asset, Quantity, TickInfo, TradingPair};
     use rust_decimal_macros::dec;
+    use std::collections::HashMap;
     use std::str::FromStr;
 
     fn usdc_asset() -> Asset {
@@ -204,12 +178,12 @@ mod tests {
         Asset::from_str("0x1::coin::ETH").unwrap()
     }
 
-    fn create_test_edge(
+    fn create_test_cpmm_edge(
         asset_x: Asset,
         asset_y: Asset,
         reserve_x_val: Decimal,
         reserve_y_val: Decimal,
-        fee_bps: u16,
+        fee_bps: u32,
     ) -> Edge {
         Edge {
             pair: TradingPair {
@@ -227,12 +201,76 @@ mod tests {
         }
     }
 
+    fn create_test_clmm_edge(
+        asset_x: Asset,
+        asset_y: Asset,
+        sqrt_price: u128,
+        liquidity: u128,
+        tick: i32,
+        fee_bps: u32,
+        tick_map: HashMap<i32, TickInfo>,
+    ) -> Edge {
+        Edge {
+            pair: TradingPair::new(asset_x, asset_y),
+            exchange: "hyperion".to_string(),
+            pool_address: "0xclmm_pool".to_string(),
+            model: PoolModel::Clmm {
+                sqrt_price,
+                liquidity,
+                tick,
+                fee_bps,
+                tick_map: Arc::new(tick_map),
+            },
+            last_updated: Instant::now(),
+        }
+    }
+
+    fn create_test_stableswap_edge(
+        asset_x: Asset,
+        asset_y: Asset,
+        reserves: Vec<Quantity>,
+        amplification_factor: u128,
+        fee_bps: u32,
+    ) -> Edge {
+        Edge {
+            pair: TradingPair::new(asset_x, asset_y),
+            exchange: "tapp".to_string(),
+            pool_address: "0xstableswap_pool".to_string(),
+            model: PoolModel::StableSwap {
+                reserves,
+                amplification_factor,
+                fee_bps,
+            },
+            last_updated: Instant::now(),
+        }
+    }
+
+    fn create_test_weighted_edge(
+        asset_x: Asset,
+        asset_y: Asset,
+        reserves: Vec<Quantity>,
+        weights: Vec<u32>,
+        fee_bps: u32,
+    ) -> Edge {
+        Edge {
+            pair: TradingPair::new(asset_x, asset_y),
+            exchange: "thala".to_string(),
+            pool_address: "0xweighted_pool".to_string(),
+            model: PoolModel::WeightedPool {
+                reserves,
+                weights,
+                fee_bps,
+            },
+            last_updated: Instant::now(),
+        }
+    }
+
     #[test]
     fn test_update_edge_and_view() {
         let mut graph = PriceGraph::new();
         let usdc = usdc_asset();
         let apt = apt_asset();
-        let edge1 = create_test_edge(usdc.clone(), apt.clone(), dec!(1000), dec!(100), 30);
+        let edge1 = create_test_cpmm_edge(usdc.clone(), apt.clone(), dec!(1000), dec!(100), 30);
 
         graph.update_edge(edge1.clone());
 
@@ -263,8 +301,9 @@ mod tests {
         let apt = apt_asset();
         let eth = eth_asset();
 
-        let fresh_edge = create_test_edge(usdc.clone(), apt.clone(), dec!(1000), dec!(100), 30);
-        let mut stale_edge = create_test_edge(apt.clone(), eth.clone(), dec!(50), dec!(1), 30);
+        let fresh_edge =
+            create_test_cpmm_edge(usdc.clone(), apt.clone(), dec!(1000), dec!(100), 30);
+        let mut stale_edge = create_test_cpmm_edge(apt.clone(), eth.clone(), dec!(50), dec!(1), 30);
         stale_edge.last_updated = Instant::now() - std::time::Duration::from_secs(10);
 
         graph.update_edge(fresh_edge.clone());
@@ -297,7 +336,7 @@ mod tests {
     #[test]
     fn test_edge_quote_simple_cpmm() {
         // USDC -> APT pool
-        let edge = create_test_edge(usdc_asset(), apt_asset(), dec!(10000), dec!(1000), 25); // 0.25% fee
+        let edge = create_test_cpmm_edge(usdc_asset(), apt_asset(), dec!(10000), dec!(1000), 25); // 0.25% fee
 
         // Quote selling 100 USDC for APT
         let amount_in_usdc = Quantity(dec!(100));
@@ -334,7 +373,7 @@ mod tests {
 
     #[test]
     fn test_edge_quote_insufficient_liquidity() {
-        let edge = create_test_edge(usdc_asset(), apt_asset(), dec!(100), dec!(10), 25);
+        let edge = create_test_cpmm_edge(usdc_asset(), apt_asset(), dec!(100), dec!(10), 25);
 
         // Try to swap more than available in reserve_x after fee
         let large_amount_in = Quantity(dec!(10000));
@@ -348,71 +387,83 @@ mod tests {
         assert!(quote_result.unwrap().0 <= dec!(10));
 
         // Test with zero reserve
-        let zero_reserve_edge = create_test_edge(usdc_asset(), apt_asset(), dec!(0), dec!(10), 25);
+        let zero_reserve_edge =
+            create_test_cpmm_edge(usdc_asset(), apt_asset(), dec!(0), dec!(10), 25);
         let amount_in = Quantity(dec!(10));
         assert!(zero_reserve_edge.quote(&amount_in, &usdc_asset()).is_none());
 
         let zero_reserve_edge_y =
-            create_test_edge(usdc_asset(), apt_asset(), dec!(10), dec!(0), 25);
+            create_test_cpmm_edge(usdc_asset(), apt_asset(), dec!(10), dec!(0), 25);
         assert!(zero_reserve_edge_y
             .quote(&amount_in, &usdc_asset())
             .is_none());
     }
 
     #[test]
-    fn test_update_concentrated_liquidity_edge() {
-        let mut graph = PriceGraph::new();
-        let asset_a = Asset::from_str("ASSET_A").unwrap();
-        let asset_b = Asset::from_str("ASSET_B").unwrap();
-
-        let forward_ticks = vec![
-            Tick {
-                price: dec!(100),
-                liquidity_gross: dec!(10),
-            }, // 1 A = 100 B
-            Tick {
-                price: dec!(90),
-                liquidity_gross: dec!(5),
-            }, // 1 A = 90 B
-        ];
-
-        let cl_edge = Edge {
-            pair: TradingPair::new(asset_a.clone(), asset_b.clone()),
-            exchange: "tapp".to_string(), // Placeholder
-            pool_address: "0x2".to_string(),
-            model: PoolModel::ConcentratedLiquidity {
-                ticks: forward_ticks.clone(),
-                fee_bps: 10,
+    fn test_clmm_quote() {
+        let mut tick_map = HashMap::new();
+        tick_map.insert(
+            0,
+            TickInfo {
+                liquidity_net: 100,
+                liquidity_gross: 100,
             },
-            last_updated: Instant::now(),
-        };
+        );
+        let edge = create_test_clmm_edge(
+            usdc_asset(),
+            apt_asset(),
+            2u128.pow(64), // sqrt_price for 1:1
+            1_000_000,
+            0,
+            30,
+            tick_map,
+        );
+        let amount_in = Quantity(dec!(100));
+        let quote_result = edge.quote(&amount_in, &usdc_asset());
+        assert!(quote_result.is_some());
+        // Note: The CLMM math is still simplified, this test will pass with the current implementation.
+        // A more robust test would require a more complex tick setup.
+        let amount_out = quote_result.unwrap().0;
+        assert!(amount_out > dec!(99) && amount_out < dec!(100));
+    }
 
-        graph.update_edge(cl_edge.clone());
-        let view = graph.create_view(&common::types::GraphView::All);
-        assert_eq!(view.graph.edge_count(), 1);
+    #[test]
+    fn test_stableswap_quote() {
+        let edge = create_test_stableswap_edge(
+            usdc_asset(),
+            apt_asset(),
+            vec![Quantity(dec!(1_000_000)), Quantity(dec!(1_000_000))],
+            100,
+            4,
+        );
+        let amount_in = Quantity(dec!(100));
+        let quote_result = edge.quote(&amount_in, &usdc_asset());
+        assert!(quote_result.is_some());
+        // With 1:1 reserves, output should be close to input minus fee
+        let amount_out = quote_result.unwrap().0;
+        assert!(amount_out > dec!(99) && amount_out < dec!(100));
+    }
 
-        let source_id = view
-            .asset_mapping
-            .iter()
-            .find(|(_, asset)| **asset == asset_a)
-            .map(|(id, _)| *id)
-            .unwrap();
-        let target_id = view
-            .asset_mapping
-            .iter()
-            .find(|(_, asset)| **asset == asset_b)
-            .map(|(id, _)| *id)
-            .unwrap();
-
-        let edges = view.graph.edge_weight(source_id, target_id).unwrap();
-        assert_eq!(edges.len(), 1);
-        let edge = &edges[0];
-        if let PoolModel::ConcentratedLiquidity { ticks, .. } = &edge.model {
-            assert_eq!(ticks.len(), 2);
-            assert_eq!(ticks[0].price, dec!(100));
-            assert_eq!(ticks[1].price, dec!(90));
-        } else {
-            panic!("Edge not CL");
-        }
+    #[test]
+    fn test_weighted_pool_quote() {
+        let edge = create_test_weighted_edge(
+            usdc_asset(),
+            apt_asset(),
+            vec![Quantity(dec!(1_000_000)), Quantity(dec!(1_000_000))],
+            vec![500000, 500000], // 50/50 weight
+            10,                   // 0.1% fee
+        );
+        let amount_in = Quantity(dec!(100));
+        let quote_result = edge.quote(&amount_in, &usdc_asset());
+        assert!(quote_result.is_some());
+        let amount_out = quote_result.unwrap().0;
+        // Calculation:
+        // amount_in_after_fee = 100 * (1 - 0.001) = 99.9
+        // r_in = 1_000_000, r_out = 1_000_000, w_in = 0.5, w_out = 0.5
+        // ratio = 1_000_000 / (1_000_000 + 99.9) = 0.9999001...
+        // power = 1
+        // factor = 1 - ratio = 0.0000999...
+        // amount_out = 1_000_000 * factor = 99.9...
+        assert!(amount_out > dec!(99) && amount_out < dec!(100));
     }
 }

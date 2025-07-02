@@ -21,7 +21,7 @@
 //! # async fn example() -> anyhow::Result<()> {
 //! let (tx, rx) = mpsc::channel(100);
 //! let (opportunity_tx, opportunity_rx) = mpsc::channel(100);
-//! 
+//!
 //! let strategies = vec![
 //!     StrategyConfig::CrossDex(Default::default()),
 //!     StrategyConfig::Triangular(detector::strategies::TriangularConfig {
@@ -48,6 +48,6 @@ pub mod transform;
 mod metrics;
 
 // Re-exports for easy access
-pub use service::DetectorService;
 pub use error::DetectorError;
+pub use service::DetectorService;
 pub use strategies::{ArbitrageStrategy, StrategyConfig};

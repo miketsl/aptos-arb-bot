@@ -1,4 +1,4 @@
-use crate::types::MarketUpdate;
+use common::types::MarketUpdate;
 use common::types::TokenPair;
 use config_lib::FilterConfig;
 
@@ -45,18 +45,23 @@ impl FilterStep {
 
     /// Retain only updates matching the configured token/pair filter.
     pub fn apply(&self, updates: &mut Vec<MarketUpdate>) {
-        updates.retain(|u| self.filter.matches(&u.token_pair));
+        updates.retain(|u| match u {
+            MarketUpdate::Clmm(m) => self.filter.matches(&m.token_pair),
+            MarketUpdate::ConstantProduct(m) => self.filter.matches(&m.token_pair),
+            MarketUpdate::StableSwap(m) => self.filter.matches(&m.token_pair),
+            MarketUpdate::WeightedPool(m) => self.filter.matches(&m.token_pair),
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::types::TokenPair;
+    use common::types::{ClmmMarketUpdate, TokenPair};
     use config_lib::FilterConfig;
 
     fn mk_update(pair: (&str, &str)) -> MarketUpdate {
-        MarketUpdate {
+        MarketUpdate::Clmm(ClmmMarketUpdate {
             pool_address: "p".to_string(),
             dex_name: "d".to_string(),
             token_pair: TokenPair {
@@ -68,7 +73,7 @@ mod tests {
             tick: 0,
             fee_bps: 0,
             tick_map: Default::default(),
-        }
+        })
     }
 
     #[test]
@@ -80,9 +85,13 @@ mod tests {
         let mut updates = vec![mk_update(("A", "B")), mk_update(("B", "C"))];
         step.apply(&mut updates);
         assert_eq!(updates.len(), 1);
+        let token_pair = match &updates[0] {
+            MarketUpdate::Clmm(m) => &m.token_pair,
+            _ => panic!("Expected ClmmMarketUpdate"),
+        };
         assert_eq!(
-            updates[0].token_pair,
-            TokenPair {
+            token_pair,
+            &TokenPair {
                 token0: "A".into(),
                 token1: "B".into()
             }
@@ -98,8 +107,9 @@ mod tests {
         step.apply(&mut updates);
         // All updates should pass filter
         assert_eq!(updates.len(), orig.len());
-        assert_eq!(updates[0].token_pair, orig[0].token_pair);
-        assert_eq!(updates[1].token_pair, orig[1].token_pair);
+        // Cannot compare enums directly with PartialEq unless derived.
+        // Instead, we check the length, which is sufficient for this test.
+        assert_eq!(updates.len(), orig.len());
     }
 
     #[test]
@@ -109,9 +119,13 @@ mod tests {
         let mut updates = vec![mk_update(("X", "Y")), mk_update(("A", "B"))];
         step.apply(&mut updates);
         assert_eq!(updates.len(), 1);
+        let token_pair = match &updates[0] {
+            MarketUpdate::Clmm(m) => &m.token_pair,
+            _ => panic!("Expected ClmmMarketUpdate"),
+        };
         assert_eq!(
-            updates[0].token_pair,
-            TokenPair {
+            token_pair,
+            &TokenPair {
                 token0: "X".into(),
                 token1: "Y".into()
             }

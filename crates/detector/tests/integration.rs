@@ -1,5 +1,5 @@
-use common::types::{Asset, GraphView, TradingPair};
-use detector::graph::{Edge, PoolModel, PriceGraph, Tick};
+use common::types::{Asset, GraphView, Quantity, TradingPair};
+use detector::graph::{Edge, PoolModel, PriceGraph};
 use detector::strategies::triangular::TriangularArbitrage;
 use detector::strategies::ArbitrageStrategy;
 use detector::strategies::TriangularConfig;
@@ -17,71 +17,82 @@ async fn integration_triangular_detection() {
     let b = Asset::from_str("B").unwrap();
     let c = Asset::from_str("C").unwrap();
 
-    let tick_ab = Tick {
-        price: dec!(2),
-        liquidity_gross: dec!(1000),
-    };
-    let tick_ba = Tick {
-        price: dec!(0.5),
-        liquidity_gross: dec!(1000),
-    };
-    let tick_bc = Tick {
-        price: dec!(3),
-        liquidity_gross: dec!(1000),
-    };
-    let tick_cb = Tick {
-        price: dec!(0.333),
-        liquidity_gross: dec!(1000),
-    };
-    let tick_ca = Tick {
-        price: dec!(4),
-        liquidity_gross: dec!(1000),
-    };
-    let tick_ac = Tick {
-        price: dec!(0.25),
-        liquidity_gross: dec!(1000),
-    };
-
     let mut graph = PriceGraph::new();
     let now = Instant::now();
 
-    for (pair, ticks) in &[
-        (
-            TradingPair::new(a.clone(), b.clone()),
-            vec![tick_ab.clone()],
-        ),
-        (
-            TradingPair::new(b.clone(), a.clone()),
-            vec![tick_ba.clone()],
-        ),
-        (
-            TradingPair::new(b.clone(), c.clone()),
-            vec![tick_bc.clone()],
-        ),
-        (
-            TradingPair::new(c.clone(), b.clone()),
-            vec![tick_cb.clone()],
-        ),
-        (
-            TradingPair::new(c.clone(), a.clone()),
-            vec![tick_ca.clone()],
-        ),
-        (
-            TradingPair::new(a.clone(), c.clone()),
-            vec![tick_ac.clone()],
-        ),
-    ] {
-        graph.update_edge(Edge {
-            pair: pair.clone(),
-            exchange: "dex".to_string(),
-            pool_address: format!("p_{}{}", pair.asset_x, pair.asset_y),
-            model: PoolModel::ConcentratedLiquidity {
-                ticks: ticks.clone(),
-                fee_bps: 0,
-            },
-            last_updated: now,
-        });
-    }
+    let edge1 = Edge {
+        pair: TradingPair::new(a.clone(), b.clone()),
+        exchange: "dex".to_string(),
+        pool_address: "p_ab".to_string(),
+        model: PoolModel::ConstantProduct {
+            reserve_x: Quantity(dec!(1000)),
+            reserve_y: Quantity(dec!(2000)),
+            fee_bps: 0,
+        },
+        last_updated: now,
+    };
+    let edge2 = Edge {
+        pair: TradingPair::new(b.clone(), a.clone()),
+        exchange: "dex".to_string(),
+        pool_address: "p_ba".to_string(),
+        model: PoolModel::ConstantProduct {
+            reserve_x: Quantity(dec!(2000)),
+            reserve_y: Quantity(dec!(1000)),
+            fee_bps: 0,
+        },
+        last_updated: now,
+    };
+    let edge3 = Edge {
+        pair: TradingPair::new(b.clone(), c.clone()),
+        exchange: "dex".to_string(),
+        pool_address: "p_bc".to_string(),
+        model: PoolModel::ConstantProduct {
+            reserve_x: Quantity(dec!(1000)),
+            reserve_y: Quantity(dec!(3000)),
+            fee_bps: 0,
+        },
+        last_updated: now,
+    };
+    let edge4 = Edge {
+        pair: TradingPair::new(c.clone(), b.clone()),
+        exchange: "dex".to_string(),
+        pool_address: "p_cb".to_string(),
+        model: PoolModel::ConstantProduct {
+            reserve_x: Quantity(dec!(3000)),
+            reserve_y: Quantity(dec!(1000)),
+            fee_bps: 0,
+        },
+        last_updated: now,
+    };
+    let edge5 = Edge {
+        pair: TradingPair::new(c.clone(), a.clone()),
+        exchange: "dex".to_string(),
+        pool_address: "p_ca".to_string(),
+        model: PoolModel::ConstantProduct {
+            reserve_x: Quantity(dec!(1000)),
+            reserve_y: Quantity(dec!(500)), // Creates arbitrage opportunity
+            fee_bps: 0,
+        },
+        last_updated: now,
+    };
+    let edge6 = Edge {
+        pair: TradingPair::new(a.clone(), c.clone()),
+        exchange: "dex".to_string(),
+        pool_address: "p_ac".to_string(),
+        model: PoolModel::ConstantProduct {
+            reserve_x: Quantity(dec!(500)),
+            reserve_y: Quantity(dec!(1000)),
+            fee_bps: 0,
+        },
+        last_updated: now,
+    };
+
+    graph.update_edge(edge1);
+    graph.update_edge(edge2);
+    graph.update_edge(edge3);
+    graph.update_edge(edge4);
+    graph.update_edge(edge5);
+    graph.update_edge(edge6);
 
     let view = graph.create_view(&GraphView::All);
     let config = TriangularConfig {

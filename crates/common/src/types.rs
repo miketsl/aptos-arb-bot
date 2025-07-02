@@ -14,7 +14,7 @@ impl fmt::Display for Price {
 }
 
 /// Represents a quantity of an asset, typically using a high-precision decimal type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Quantity(pub Decimal);
 
 impl fmt::Display for Quantity {
@@ -170,7 +170,7 @@ pub struct TokenPair {
 }
 
 /// Information about a specific tick in the CLMM
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TickInfo {
     pub liquidity_net: i128,
     pub liquidity_gross: u128,
@@ -178,15 +178,59 @@ pub struct TickInfo {
 
 /// Market update to be sent to the detector
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MarketUpdate {
+pub struct ClmmMarketUpdate {
     pub pool_address: String,
     pub dex_name: String,
     pub token_pair: TokenPair,
     pub sqrt_price: u128,
     pub liquidity: u128,
-    pub tick: u32,
+    pub tick: i32, // Changed from u32 to i32 to match CLMM spec
     pub fee_bps: u32,
     pub tick_map: HashMap<i32, TickInfo>,
+}
+
+// For Constant Product Market Makers (CPMM)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConstantProductMarketUpdate {
+    pub pool_address: String,
+    pub dex_name: String,
+    pub token_pair: TokenPair,
+    pub reserve_x: Quantity,
+    pub reserve_y: Quantity,
+    pub fee_bps: u32,
+}
+
+// For StableSwap pools (e.g., Curve-like)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StableSwapMarketUpdate {
+    pub pool_address: String,
+    pub dex_name: String,
+    pub token_pair: TokenPair, // Or Vec<Asset> for multi-asset stableswaps
+    pub reserves: Vec<Quantity>, // Current reserves of all assets
+    pub amplification_factor: u128, // The 'A' parameter
+    pub fee_bps: u32,
+    // Add other relevant StableSwap parameters like future_A, future_A_time, etc. if needed
+}
+
+// For Weighted Pools (e.g., Balancer-like)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeightedPoolMarketUpdate {
+    pub pool_address: String,
+    pub dex_name: String,
+    pub token_pair: TokenPair, // Or Vec<Asset> for multi-asset weighted pools
+    pub reserves: Vec<Quantity>, // Current reserves of all assets
+    pub weights: Vec<u32>,     // Weights for each asset, e.g., 500000 for 50%
+    pub fee_bps: u32,
+}
+
+/// Market update to be sent to the detector
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MarketUpdate {
+    Clmm(ClmmMarketUpdate),
+    ConstantProduct(ConstantProductMarketUpdate),
+    StableSwap(StableSwapMarketUpdate),
+    WeightedPool(WeightedPoolMarketUpdate),
+    // Add other pool types as needed
 }
 
 #[cfg(test)]

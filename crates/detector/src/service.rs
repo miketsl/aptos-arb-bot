@@ -7,7 +7,7 @@ use crate::{
     transform::transform_update,
 };
 use anyhow::Result;
-use common::types::{ArbitrageOpportunity, DetectorMessage, TradingPair};
+use common::types::{ArbitrageOpportunity, DetectorMessage, MarketUpdate, TradingPair};
 use futures::future::join_all;
 use futures::FutureExt;
 use log::{debug, error, info, warn};
@@ -82,7 +82,13 @@ impl DetectorService {
                 self.updated_pairs.clear();
             }
             DetectorMessage::MarketUpdate(update) => {
-                debug!("Received MarketUpdate for pool: {}", update.pool_address);
+                let pool_address = match &update {
+                    MarketUpdate::Clmm(data) => &data.pool_address,
+                    MarketUpdate::ConstantProduct(data) => &data.pool_address,
+                    MarketUpdate::StableSwap(data) => &data.pool_address,
+                    MarketUpdate::WeightedPool(data) => &data.pool_address,
+                };
+                debug!("Received MarketUpdate for pool: {}", pool_address);
                 match transform_update(update.clone()) {
                     Ok(edge) => {
                         self.updated_pairs.insert(edge.pair.clone());
@@ -141,11 +147,11 @@ impl DetectorService {
                         if !self.deduplicator.is_duplicate(&opp) {
                             // Use try_send to avoid blocking if the channel is full
                             match self.opportunity_sender.try_send(opp) {
-                                Ok(()) => {},
+                                Ok(()) => {}
                                 Err(mpsc::error::TrySendError::Full(_)) => {
                                     warn!("Opportunity channel full, dropping opportunity");
                                     self.metrics.dropped_opportunities.inc();
-                                },
+                                }
                                 Err(mpsc::error::TrySendError::Closed(_)) => {
                                     self.handle_error(DetectorError::ChannelClosed).await;
                                 }
