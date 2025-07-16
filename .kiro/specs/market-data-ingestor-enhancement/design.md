@@ -442,22 +442,6 @@ pub enum DataSourceConfig {
     Grpc { endpoint: String, timeout_ms: u64 },
     File { path: String, replay_speed: Option<f64> },
 }
-
-#[derive(Deserialize)]
-pub struct PoolStateConfig {
-    pub providers: HashMap<String, PoolStateProviderConfig>,
-    pub cache_ttl_seconds: u64,
-    pub max_cache_size: usize,
-    pub rate_limit_per_second: u32,
-}
-
-#[derive(Deserialize)]
-pub struct PoolStateProviderConfig {
-    pub base_url: String,
-    pub timeout_ms: u64,
-    pub retry_attempts: u32,
-    pub rate_limit_per_second: u32,
-}
 ```
 
 ## Error Handling
