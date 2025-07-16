@@ -4,7 +4,7 @@ use crate::steps::{DetectorPushStep, EventExtractorStep, FilterStep, Parser};
 use anyhow::Result;
 use chrono::Utc;
 use common::types::DetectorMessage;
-use config_lib::DataSource as DataSourceConfig;
+use config_lib::DataSourceConfig;
 use dex_adapter_trait::DexAdapter;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,7 +25,7 @@ impl MarketDataIngestorProcessor {
         adapters: HashMap<String, Arc<dyn DexAdapter>>,
     ) -> Result<Self> {
         let parser = Parser::new(adapters);
-        let filter_step = FilterStep::new(&config.market_data_config.filters);
+        let filter_step = FilterStep::from_ingestor_config(&config.ingestor_config.filters);
         Ok(Self {
             config,
             parser,
@@ -63,18 +63,23 @@ impl MarketDataIngestorProcessor {
         info!(starting_version = ?starting_version, "Starting from version");
 
         // Select data source (gRPC live stream or file replay) from config
-        let mut source: Box<dyn SourceTrait> = match &self.config.market_data_config.data_source {
-            DataSourceConfig::Grpc => {
-                Box::new(GrpcSource::new(self.config.transaction_stream_config.clone()).await?)
-            }
-            DataSourceConfig::File { path, replay_speed } => {
-                Box::new(FileSource::new(path.clone(), *replay_speed)?)
+        let mut source: Box<dyn SourceTrait> = match &self.config.ingestor_config.data_source {
+            DataSourceConfig::Grpc {
+                endpoint: _,
+                timeout_ms: _,
+                ..
+            } => Box::new(GrpcSource::new(self.config.transaction_stream_config.clone()).await?),
+            DataSourceConfig::File {
+                path, replay_speed, ..
+            } => {
+                let speed = replay_speed.unwrap_or(1.0);
+                Box::new(FileSource::new(path.clone(), speed)?)
             }
         };
 
         // Create processing steps
         let mut event_extractor =
-            EventExtractorStep::new(self.config.market_data_config.dexs.clone());
+            EventExtractorStep::from_adapter_configs(self.config.ingestor_config.adapters.clone());
 
         let detector_push = DetectorPushStep::new(update_sender);
 

@@ -1,6 +1,6 @@
 use common::types::MarketUpdate;
 use common::types::TokenPair;
-use config_lib::FilterConfig;
+use config_lib::{FilterConfig, IngestorFilterConfig};
 
 /// Filter criteria for selecting which CLMM pools to ingest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +39,31 @@ impl FilterStep {
             FilterConfig::All => PoolFilter::All,
             FilterConfig::Token { token } => PoolFilter::Token(token.clone()),
             FilterConfig::TokenPairs { token_pairs } => PoolFilter::TokenPairs(token_pairs.clone()),
+        };
+        FilterStep { filter }
+    }
+
+    /// Create a new `FilterStep` from the enhanced ingestor filter configuration.
+    pub fn from_ingestor_config(cfg: &IngestorFilterConfig) -> Self {
+        let filter = if !cfg.enabled {
+            PoolFilter::All
+        } else if let Some(ref pairs) = cfg.token_pairs {
+            PoolFilter::TokenPairs(pairs.clone())
+        } else if let Some(ref whitelist) = cfg.token_whitelist {
+            if whitelist.len() == 1 {
+                PoolFilter::Token(whitelist[0].clone())
+            } else {
+                // For multiple tokens, create all possible pairs
+                let mut pairs = Vec::new();
+                for i in 0..whitelist.len() {
+                    for j in i + 1..whitelist.len() {
+                        pairs.push((whitelist[i].clone(), whitelist[j].clone()));
+                    }
+                }
+                PoolFilter::TokenPairs(pairs)
+            }
+        } else {
+            PoolFilter::All
         };
         FilterStep { filter }
     }

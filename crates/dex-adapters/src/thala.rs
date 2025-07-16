@@ -79,7 +79,7 @@ impl DexAdapter for ThalaAdapter {
 mod tests {
     use super::*;
     use common::types::Event;
-    
+
     use rust_decimal_macros::dec;
 
     #[test]

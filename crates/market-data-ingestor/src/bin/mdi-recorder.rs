@@ -34,9 +34,14 @@ fn main() -> anyhow::Result<()> {
             .unwrap();
         // Load config and extract transaction stream settings
         let cfg = load_config_from_path(args.config_path.to_str().unwrap()).await?;
-        let indexer_cfg = IndexerProcessorConfig::new(
+
+        // Ensure ingestor config is present
+        let ingestor_config = cfg.ingestor
+            .expect("Enhanced ingestor configuration is required. Please add 'ingestor' section to your config file.");
+
+        let indexer_cfg = IndexerProcessorConfig::from_enhanced_config(
             cfg.transaction_stream_config.clone(),
-            cfg.market_data_config.clone(),
+            ingestor_config,
         );
 
         // Set up gRPC stream

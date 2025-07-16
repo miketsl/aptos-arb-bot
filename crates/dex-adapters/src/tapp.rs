@@ -130,7 +130,7 @@ impl DexAdapter for TappAdapter {
 mod tests {
     use super::*;
     use common::types::Event;
-    
+
     use rust_decimal_macros::dec;
 
     #[test]

@@ -16,9 +16,14 @@ async fn main() -> Result<()> {
     )
     .await
     .expect("Failed to load config");
-    let config = IndexerProcessorConfig::new(
+
+    // Ensure ingestor config is present
+    let ingestor_config = config_from_path.ingestor
+        .expect("Enhanced ingestor configuration is required. Please add 'ingestor' section to your config file.");
+
+    let config = IndexerProcessorConfig::from_enhanced_config(
         config_from_path.transaction_stream_config,
-        config_from_path.market_data_config,
+        ingestor_config,
     );
 
     // Create a channel for market updates
