@@ -68,14 +68,17 @@ impl MarketDataIngestorProcessor {
                 endpoint: _,
                 timeout_ms: _,
                 ..
-            } => Box::new(GrpcSource::new(self.config.transaction_stream_config.clone()).await?),
+            } => Box::new(GrpcSource::new(self.config.transaction_stream_config.clone())),
             DataSourceConfig::File {
                 path, replay_speed, ..
             } => {
                 let speed = replay_speed.unwrap_or(1.0);
-                Box::new(FileSource::new(path.clone(), speed)?)
+                Box::new(FileSource::new(path.clone(), speed))
             }
         };
+
+        // Start the data source
+        source.start().await.map_err(|e| anyhow::anyhow!("Failed to start data source: {}", e))?;
 
         // Create processing steps
         let mut event_extractor =
@@ -94,63 +97,72 @@ impl MarketDataIngestorProcessor {
                     break;
                 }
 
-                batch_result = source.get_next_batch() => {
-                    match batch_result {
-                        Ok(response) => {
+                event_result = source.next_event() => {
+                    match event_result {
+                        Ok(Some(timestamped_event)) => {
+                            let transaction = timestamped_event.raw_event.transaction;
+                            let version = transaction.version;
+
                             info!(
-                                start_version = response.start_version,
-                                end_version = response.end_version,
-                                num_transactions = response.transactions.len(),
-                                "Received transaction batch"
+                                version = version,
+                                sequence = timestamped_event.sequence,
+                                "Received transaction event"
                             );
 
-                            // Emit BlockStart before processing this block
+                            // Emit BlockStart before processing this transaction
                             detector_push.push(DetectorMessage::BlockStart {
-                                block_number: response.start_version,
+                                block_number: version,
                                 timestamp: Utc::now(),
                             }).await?;
-                            for transaction in response.transactions {
-                                let version = transaction.version;
 
-                                // Extract relevant events
-                                match event_extractor.process_transaction(transaction.clone()).await {
-                                    Ok(events) if !events.is_empty() => {
-                                        // Parse events into market updates
-                                        match self.parser.process_events(&events) {
-                                            Ok(mut updates) if !updates.is_empty() => {
-                                                // Filter in-place to drop unwanted pools
-                                                self.filter_step.apply(&mut updates);
-                                                if !updates.is_empty() {
-                                                    // Push updates to detector
-                                                    for update in updates {
-                                                        if let Err(e) = detector_push.push(DetectorMessage::MarketUpdate(update)).await {
-                                                            error!(version = version, error = %e, "Failed to send MarketUpdate message");
-                                                        }
+                            // Extract relevant events
+                            match event_extractor.process_transaction(transaction.clone()).await {
+                                Ok(events) if !events.is_empty() => {
+                                    // Parse events into market updates
+                                    match self.parser.process_events(&events) {
+                                        Ok(mut updates) if !updates.is_empty() => {
+                                            // Filter in-place to drop unwanted pools
+                                            self.filter_step.apply(&mut updates);
+                                            if !updates.is_empty() {
+                                                // Push updates to detector
+                                                for update in updates {
+                                                    if let Err(e) = detector_push.push(DetectorMessage::MarketUpdate(update)).await {
+                                                        error!(version = version, error = %e, "Failed to send MarketUpdate message");
                                                     }
                                                 }
                                             }
-                                            Ok(_) => {} // No updates generated
-                                            Err(e) => {
-                                                error!(version = version, error = %e, "Failed to parse events");
-                                            }
+                                        }
+                                        Ok(_) => {} // No updates generated
+                                        Err(e) => {
+                                            error!(version = version, error = %e, "Failed to parse events");
                                         }
                                     }
-                                    Ok(_) => {} // No relevant events
-                                    Err(e) => {
-                                        error!(version = version, error = %e, "Failed to extract events");
-                                    }
+                                }
+                                Ok(_) => {} // No relevant events
+                                Err(e) => {
+                                    error!(version = version, error = %e, "Failed to extract events");
                                 }
                             }
-                            // Emit BlockEnd after processing this block
-                            detector_push.push(DetectorMessage::BlockEnd { block_number: response.end_version }).await?;
+
+                            // Emit BlockEnd after processing this transaction
+                            detector_push.push(DetectorMessage::BlockEnd { block_number: version }).await?;
+                        }
+                        Ok(None) => {
+                            info!("Data source ended");
+                            break;
                         }
                         Err(e) => {
-                            error!(error = %e, "Error receiving transaction batch");
+                            error!(error = %e, "Error receiving transaction event");
                             break;
                         }
                     }
                 }
             }
+        }
+
+        // Clean up the data source
+        if let Err(e) = source.stop().await {
+            warn!(error = %e, "Error stopping data source");
         }
 
         Ok(())

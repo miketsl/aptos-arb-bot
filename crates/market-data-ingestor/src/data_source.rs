@@ -1,6 +1,6 @@
 use anyhow::Result;
 use aptos_indexer_processor_sdk::aptos_indexer_transaction_stream::{
-    TransactionStream, TransactionStreamConfig, TransactionsPBResponse,
+    TransactionStream, TransactionStreamConfig,
 };
 use async_trait::async_trait;
 
@@ -87,41 +87,7 @@ pub trait DataSource: Send {
     fn source_type(&self) -> &'static str;
 }
 
-/// Legacy trait for backward compatibility
-#[async_trait]
-pub trait LegacyDataSource: Send {
-    /// Fetch the next batch of transactions from this source.
-    async fn get_next_batch(&mut self) -> Result<TransactionsPBResponse>;
-}
 
-/// Live data source using the Aptos gRPC transaction stream.
-pub struct GrpcSource {
-    inner: TransactionStream,
-}
-
-impl GrpcSource {
-    /// Wrap an existing `TransactionStream` from the given configuration.
-    pub async fn new(config: TransactionStreamConfig) -> Result<Self> {
-        let inner = TransactionStream::new(config).await?;
-        Ok(Self { inner })
-    }
-}
-
-#[async_trait]
-impl LegacyDataSource for GrpcSource {
-    async fn get_next_batch(&mut self) -> Result<TransactionsPBResponse> {
-        let batch = self.inner.get_next_transaction_batch().await?;
-        Ok(batch)
-    }
-}
-
-/// File-based data source for replaying prerecorded protobuf data (RecordedBatch).
-pub struct FileSource {
-    buf: Bytes,
-    first_timestamp_ms: Option<i64>,
-    start_instant: Instant,
-    replay_speed: f64,
-}
 
 /// Protobuf message for recorded batches, matching the architecture spec.
 #[derive(prost::Message, Serialize, Deserialize)]
@@ -137,74 +103,15 @@ pub struct RecordedBatch {
     pub transactions: Vec<ProtoTransaction>,
 }
 
-impl FileSource {
-    /// Create a new file-based source from the given path and replay speed (1.0 = real-time).
-    pub fn new(path: String, replay_speed: f64) -> Result<Self> {
-        let data = fs::read(path)?;
-        Ok(Self {
-            buf: Bytes::from(data),
-            first_timestamp_ms: None,
-            start_instant: Instant::now(),
-            replay_speed,
-        })
-    }
-}
-
-#[async_trait]
-impl LegacyDataSource for FileSource {
-    async fn get_next_batch(&mut self) -> Result<TransactionsPBResponse> {
-        // Decode the next length-delimited RecordedBatch from the file
-        let batch = RecordedBatch::decode_length_delimited(&mut self.buf)?;
-
-        // Manage replay timing based on recorded timestamps
-        if let Some(first_ts) = self.first_timestamp_ms {
-            let elapsed_ms = (batch.timestamp_ms - first_ts).max(0) as u64;
-            let delay = Duration::from_millis((elapsed_ms as f64 / self.replay_speed) as u64);
-            let target = self.start_instant + delay;
-            let now = Instant::now();
-            if target > now {
-                tokio::time::sleep(target - now).await;
-            }
-        } else {
-            self.first_timestamp_ms = Some(batch.timestamp_ms);
-            self.start_instant = Instant::now();
-        }
-
-        // Prepare TransactionsPBResponse from recorded data
-        let RecordedBatch {
-            start_version,
-            end_version,
-            transactions,
-            ..
-        } = batch;
-        // Recorded data does not include a chain_id; default to zero
-        let chain_id = 0;
-        let start_txn_timestamp = transactions.first().and_then(|t| t.timestamp);
-        let end_txn_timestamp = transactions.last().and_then(|t| t.timestamp);
-        // Size is unknown for replay; set to zero
-        let size_in_bytes = 0;
-
-        Ok(TransactionsPBResponse {
-            transactions,
-            chain_id,
-            start_version,
-            end_version,
-            start_txn_timestamp,
-            end_txn_timestamp,
-            size_in_bytes,
-        })
-    }
-}
-
-/// Enhanced gRPC data source with lifecycle management
-pub struct EnhancedGrpcSource {
+/// gRPC data source with lifecycle management
+pub struct GrpcSource {
     inner: Option<TransactionStream>,
     config: TransactionStreamConfig,
     sequence_counter: u64,
     is_active: bool,
 }
 
-impl EnhancedGrpcSource {
+impl GrpcSource {
     pub fn new(config: TransactionStreamConfig) -> Self {
         Self {
             inner: None,
@@ -216,7 +123,7 @@ impl EnhancedGrpcSource {
 }
 
 #[async_trait]
-impl DataSource for EnhancedGrpcSource {
+impl DataSource for GrpcSource {
     async fn start(&mut self) -> Result<(), DataSourceError> {
         if self.is_active {
             return Ok(());
@@ -288,8 +195,8 @@ impl DataSource for EnhancedGrpcSource {
     }
 }
 
-/// Enhanced file data source with lifecycle management
-pub struct EnhancedFileSource {
+/// File data source with lifecycle management
+pub struct FileSource {
     buf: Option<Bytes>,
     file_path: String,
     first_timestamp_ms: Option<i64>,
@@ -299,7 +206,7 @@ pub struct EnhancedFileSource {
     is_active: bool,
 }
 
-impl EnhancedFileSource {
+impl FileSource {
     pub fn new(file_path: String, replay_speed: f64) -> Self {
         Self {
             buf: None,
@@ -314,7 +221,7 @@ impl EnhancedFileSource {
 }
 
 #[async_trait]
-impl DataSource for EnhancedFileSource {
+impl DataSource for FileSource {
     async fn start(&mut self) -> Result<(), DataSourceError> {
         if self.is_active {
             return Ok(());
@@ -411,7 +318,7 @@ impl DataSource for EnhancedFileSource {
 mod tests {
     use super::*;
     use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::Transaction as ProtoTransaction;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::SystemTime;
 
     /// Mock data source for testing
     struct MockDataSource {
@@ -616,14 +523,14 @@ mod tests {
     }
 
     // Note: gRPC source tests are disabled due to Sync trait requirements
-    // The enhanced implementations work but cannot be tested easily in unit tests
+    // The implementations work but cannot be tested easily in unit tests
 
     #[test]
-    fn test_enhanced_file_source_creation() {
+    fn test_file_source_creation() {
         let file_path = "test_file.pb".to_string();
         let replay_speed = 2.0;
 
-        let source = EnhancedFileSource::new(file_path.clone(), replay_speed);
+        let source = FileSource::new(file_path.clone(), replay_speed);
         assert!(!source.is_active());
         assert_eq!(source.source_type(), "file");
         assert_eq!(source.sequence_counter, 0);
@@ -632,8 +539,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_enhanced_file_source_file_not_found() {
-        let mut source = EnhancedFileSource::new("nonexistent_file.pb".to_string(), 1.0);
+    async fn test_file_source_file_not_found() {
+        let mut source = FileSource::new("nonexistent_file.pb".to_string(), 1.0);
         
         let result = source.start().await;
         assert!(result.is_err());
