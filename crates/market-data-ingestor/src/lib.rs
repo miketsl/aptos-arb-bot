@@ -11,4 +11,5 @@ pub use processor::MarketDataIngestorProcessor;
 pub use data_source::{
     DataSource, DataSourceError, RawEvent, TimestampedEvent, EventMetadata,
     GrpcSource, FileSource, RecordedBatch,
+    ReconnectionConfig, ConnectionStats, ConnectionState,
 };
