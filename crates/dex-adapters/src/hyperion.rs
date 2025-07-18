@@ -3,7 +3,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use common::types::{ClmmMarketUpdate, Event, MarketUpdate, TokenPair};
-use dex_adapter_trait::DexAdapter;
+use crate::{DexAdapter, PoolState};
 use serde::Deserialize;
 use serde_json::from_slice;
 use std::collections::HashMap;
@@ -24,8 +24,23 @@ struct HyperionSwapEvent {
 }
 
 /// A stateless adapter for the Hyperion DEX.
-#[derive(Default)]
-pub struct HyperionAdapter;
+pub struct HyperionAdapter {
+    module_addresses: Vec<String>,
+}
+
+impl HyperionAdapter {
+    pub fn new(module_addresses: Vec<String>) -> Self {
+        Self { module_addresses }
+    }
+}
+
+impl Default for HyperionAdapter {
+    fn default() -> Self {
+        Self::new(vec![
+            "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039".to_string()
+        ])
+    }
+}
 
 #[async_trait]
 impl DexAdapter for HyperionAdapter {
@@ -60,6 +75,61 @@ impl DexAdapter for HyperionAdapter {
 
         Ok(Some(market_update))
     }
+
+    fn module_addresses(&self) -> &[String] {
+        &self.module_addresses
+    }
+
+    fn extract_pool_ids(&self, event: &Event) -> Result<Vec<String>> {
+        // Try to parse as Hyperion swap event to extract pool ID
+        if let Ok(swap) = from_slice::<HyperionSwapEvent>(event.data.as_bytes()) {
+            Ok(vec![swap.pool_id])
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    async fn fetch_pool_state(&self, pool_id: &str) -> Result<PoolState> {
+        // Hyperion REST API integration
+        let client = reqwest::Client::new();
+        let url = format!("https://api.hyperion.xyz/v1/pools/{}", pool_id);
+        
+        let response = client.get(&url).send().await?;
+        let pool_data: HyperionPoolResponse = response.json().await?;
+        
+        Ok(PoolState {
+            pool_id: pool_data.pool_id,
+            dex_name: self.id().to_string(),
+            token_a: pool_data.token_a,
+            token_b: pool_data.token_b,
+            reserve_a: pool_data.reserve_a.to_string(),
+            reserve_b: pool_data.reserve_b.to_string(),
+            fee_rate: (pool_data.fee_bps as f64 / 10000.0).to_string(),
+            block_height: pool_data.last_updated_block,
+            additional_data: serde_json::json!({
+                "sqrt_price": pool_data.sqrt_price,
+                "liquidity": pool_data.liquidity,
+                "tick": pool_data.tick,
+                "tick_spacing": pool_data.tick_spacing
+            }),
+        })
+    }
+}
+
+/// Response structure for Hyperion pool state API
+#[derive(Debug, Deserialize)]
+struct HyperionPoolResponse {
+    pool_id: String,
+    token_a: String,
+    token_b: String,
+    reserve_a: u128,
+    reserve_b: u128,
+    fee_bps: u32,
+    sqrt_price: u128,
+    liquidity: u128,
+    tick: i32,
+    tick_spacing: u32,
+    last_updated_block: u64,
 }
 
 #[cfg(test)]

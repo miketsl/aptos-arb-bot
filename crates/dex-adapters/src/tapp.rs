@@ -6,7 +6,7 @@ use common::types::{
     ClmmMarketUpdate, ConstantProductMarketUpdate, Event, MarketUpdate, StableSwapMarketUpdate,
     TokenPair,
 };
-use dex_adapter_trait::DexAdapter;
+use crate::{DexAdapter, PoolState};
 use serde::Deserialize;
 use serde_json::from_slice;
 use std::collections::HashMap;
@@ -32,8 +32,23 @@ struct TappSwapEvent {
 }
 
 /// A stateless adapter for the Tapp DEX.
-#[derive(Default)]
-pub struct TappAdapter;
+pub struct TappAdapter {
+    module_addresses: Vec<String>,
+}
+
+impl TappAdapter {
+    pub fn new(module_addresses: Vec<String>) -> Self {
+        Self { module_addresses }
+    }
+}
+
+impl Default for TappAdapter {
+    fn default() -> Self {
+        Self::new(vec![
+            "0xtapp_module_address".to_string() // Placeholder from config
+        ])
+    }
+}
 
 #[async_trait]
 impl DexAdapter for TappAdapter {
@@ -124,6 +139,90 @@ impl DexAdapter for TappAdapter {
 
         Ok(Some(market_update))
     }
+
+    fn module_addresses(&self) -> &[String] {
+        &self.module_addresses
+    }
+
+    fn extract_pool_ids(&self, event: &Event) -> Result<Vec<String>> {
+        // Try to parse as Tapp swap event to extract pool ID
+        if let Ok(swap) = from_slice::<TappSwapEvent>(event.data.as_bytes()) {
+            Ok(vec![swap.pool_id])
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    async fn fetch_pool_state(&self, pool_id: &str) -> Result<PoolState> {
+        // Tapp REST API integration
+        let client = reqwest::Client::new();
+        let url = format!("https://api.tapp.xyz/v1/pools/{}", pool_id);
+        
+        let response = client.get(&url).send().await?;
+        let pool_data: TappPoolResponse = response.json().await?;
+        
+        // Handle different pool types
+        let (reserve_a, reserve_b) = match pool_data.pool_type.as_str() {
+            "clmm" => {
+                // For CLMM pools, calculate reserves from liquidity and price
+                let sqrt_price = pool_data.sqrt_price.unwrap_or(0);
+                let liquidity = pool_data.liquidity.unwrap_or(0);
+                // Simplified calculation - real implementation would be more complex
+                (liquidity.to_string(), (liquidity / sqrt_price.max(1)).to_string())
+            }
+            "constant_product" | "stable_swap" => {
+                if pool_data.reserves.len() >= 2 {
+                    (pool_data.reserves[0].clone(), pool_data.reserves[1].clone())
+                } else {
+                    return Err(anyhow!("Pool must have at least 2 reserves"));
+                }
+            }
+            _ => return Err(anyhow!("Unsupported pool type: {}", pool_data.pool_type)),
+        };
+        
+        let (token_a, token_b) = if pool_data.tokens.len() >= 2 {
+            (pool_data.tokens[0].clone(), pool_data.tokens[1].clone())
+        } else {
+            return Err(anyhow!("Pool must have at least 2 tokens"));
+        };
+        
+        Ok(PoolState {
+            pool_id: pool_data.pool_id,
+            dex_name: self.id().to_string(),
+            token_a,
+            token_b,
+            reserve_a,
+            reserve_b,
+            fee_rate: (pool_data.fee_bps as f64 / 10000.0).to_string(),
+            block_height: pool_data.last_updated_block,
+            additional_data: serde_json::json!({
+                "pool_type": pool_data.pool_type,
+                "tokens": pool_data.tokens,
+                "reserves": pool_data.reserves,
+                "sqrt_price": pool_data.sqrt_price,
+                "liquidity": pool_data.liquidity,
+                "tick": pool_data.tick,
+                "amplification_factor": pool_data.amplification_factor
+            }),
+        })
+    }
+}
+
+/// Response structure for Tapp pool state API
+#[derive(Debug, Deserialize)]
+struct TappPoolResponse {
+    pool_id: String,
+    pool_type: String,
+    tokens: Vec<String>,
+    reserves: Vec<String>,
+    fee_bps: u32,
+    last_updated_block: u64,
+    // CLMM specific fields
+    sqrt_price: Option<u128>,
+    liquidity: Option<u128>,
+    tick: Option<i32>,
+    // Stable swap specific fields
+    amplification_factor: Option<u32>,
 }
 
 #[cfg(test)]
