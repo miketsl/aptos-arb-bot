@@ -2,7 +2,6 @@
 members = [
     "crates/common",
     "crates/core",
-    "crates/dex-adapter-trait",
     "crates/detector",
     "crates/executor",
     "crates/analytics",

@@ -17,7 +17,7 @@ thiserror = "1.0"
 # Internal dependencies
 common = { path = "../common" }
 detector = { path = "../detector" }
-dex-adapter-trait = { path = "../dex-adapter-trait" }
+dex-adapters = { path = "../dex-adapters" }
 
 [dev-dependencies]
 tempfile = "3.0"

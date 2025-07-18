@@ -5,7 +5,7 @@ use anyhow::Result;
 use chrono::Utc;
 use common::types::DetectorMessage;
 use config_lib::DataSourceConfig;
-use dex_adapter_trait::DexAdapter;
+use dex_adapters::DexAdapter;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};

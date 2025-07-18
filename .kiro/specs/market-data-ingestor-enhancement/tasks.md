@@ -1,20 +1,20 @@
 # Implementation Plan
 
-- [ ] 1. Set up enhanced configuration system and data models
+- [x] 1. Set up enhanced configuration system and data models
   - Create new configuration structures for data sources, filters, and performance settings
   - Implement YAML deserialization with validation for all configuration options
   - Add configuration loading utilities with environment-specific overrides
   - Write unit tests for configuration parsing and validation
   - _Requirements: 1.1, 3.1, 3.3_
 
-- [ ] 2. Implement core data source abstraction and trait system
+- [x] 2. Implement core data source abstraction and trait system
   - Define DataSource trait with async methods for start, next_event, and stop
   - Create RawEvent and TimestampedEvent data structures
   - Implement error types for data source operations
   - Write unit tests for data structures and trait interface
   - _Requirements: 1.1, 1.5_
 
-- [ ] 3. Build gRPC data source implementation
+- [x] 3. Build gRPC data source implementation
   - Implement GrpcDataSource struct with connection management
   - Add exponential backoff reconnection strategy with configurable parameters
   - Implement connection health monitoring and graceful degradation
@@ -22,7 +22,7 @@
   - Write integration tests with actual gRPC endpoint
   - _Requirements: 1.2, 6.1_
 
-- [ ] 4. Create enhanced file-based data source for replay functionality with embedded pool state
+- [x] 4. Create enhanced file-based data source for replay functionality with embedded pool state
   - Implement enhanced RecordedBatch structure with pool_initializations field
   - Update FileDataSource to handle embedded pool state data during replay
   - Add configurable replay speed with timing preservation
@@ -41,7 +41,7 @@
   - Write unit tests for conversion accuracy, data integrity, and pool state embedding
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 8.2_
 
-- [ ] 6. Implement enhanced DEX adapter system
+- [x] 6. Implement enhanced DEX adapter system
   - Refactor existing DexAdapter trait to include module_addresses method
   - Create EventRouter for module address-based event routing
   - Update existing DEX adapters (Hyperion, Thala, Tapp) to new interface

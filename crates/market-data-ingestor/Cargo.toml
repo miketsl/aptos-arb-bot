@@ -38,7 +38,7 @@ clap = { version = "4.4", features = ["derive"] }
 common = { path = "../common" }
 config_lib = { path = "../config", package = "config" }
 detector = { path = "../detector" }
-dex-adapter-trait = { path = "../dex-adapter-trait" }
+dex-adapters = { path = "../dex-adapters" }
 yoke = "0.8.0"
 futures = "0.3.31"
 rustls = "0.23.28"

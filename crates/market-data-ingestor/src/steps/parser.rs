@@ -1,6 +1,6 @@
 use anyhow::Result;
 use common::types::{Event, MarketUpdate};
-use dex_adapter_trait::DexAdapter;
+use dex_adapters::DexAdapter;
 use std::collections::HashMap;
 use std::sync::Arc;
 

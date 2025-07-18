@@ -4,7 +4,7 @@ use clap::Parser;
 use common::types::{ClmmMarketUpdate, DetectorMessage, MarketUpdate, TokenPair};
 use config::Config;
 use detector::DetectorService;
-use dex_adapter_trait::DexAdapter;
+use dex_adapters::DexAdapter;
 use dex_adapters::{HyperionAdapter, TappAdapter, ThalaAdapter};
 use market_data_ingestor::{IndexerProcessorConfig, MarketDataIngestorProcessor};
 use std::collections::HashMap;
@@ -42,9 +42,9 @@ async fn main() -> Result<()> {
         }
 
         let adapter: Arc<dyn DexAdapter> = match adapter_config.name.as_str() {
-            "hyperion" => Arc::new(HyperionAdapter),
-            "thala" => Arc::new(ThalaAdapter),
-            "tapp" => Arc::new(TappAdapter),
+            "hyperion" => Arc::new(HyperionAdapter::new(vec![adapter_config.module_address.clone()])),
+            "thala" => Arc::new(ThalaAdapter::new(vec![adapter_config.module_address.clone()])),
+            "tapp" => Arc::new(TappAdapter::new(vec![adapter_config.module_address.clone()])),
             _ => {
                 anyhow::bail!("Unknown adapter: {}", adapter_config.name);
             }
