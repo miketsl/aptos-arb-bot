@@ -230,12 +230,10 @@ impl DataSource for GrpcSource {
         }
 
         // Perform health check if needed
-        if self.needs_health_check() {
-            if !self.health_check().await {
-                tracing::warn!("Health check failed, attempting reconnection");
-                self.inner = None;
-                self.connection_state = ConnectionState::Disconnected;
-            }
+        if self.needs_health_check() && !self.health_check().await {
+            tracing::warn!("Health check failed, attempting reconnection");
+            self.inner = None;
+            self.connection_state = ConnectionState::Disconnected;
         }
 
         // Ensure we have a connection

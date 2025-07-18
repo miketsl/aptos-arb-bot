@@ -62,6 +62,7 @@ fn main() -> anyhow::Result<()> {
                     .start_txn_timestamp
                     .map_or(0, |ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000),
                 transactions: batch.transactions,
+                pool_initializations: vec![], // TODO: Implement pool state detection and embedding in Task 5
             };
             // Serialize into an in-memory buffer, then write to file
             let mut buf = bytes::BytesMut::new();

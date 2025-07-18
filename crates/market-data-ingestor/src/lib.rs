@@ -10,6 +10,6 @@ pub use processor::MarketDataIngestorProcessor;
 // Export the data source abstractions
 pub use data_source::{
     DataSource, DataSourceError, RawEvent, TimestampedEvent, EventMetadata,
-    GrpcSource, FileSource, RecordedBatch,
+    GrpcSource, FileSource, RecordedBatch, RecordedPoolState, PoolInitialization,
     ReconnectionConfig, ConnectionStats, ConnectionState,
 };

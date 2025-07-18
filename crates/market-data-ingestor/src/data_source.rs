@@ -85,8 +85,8 @@ pub trait DataSource: Send {
     fn source_type(&self) -> &'static str;
 }
 
-/// Protobuf message for recorded batches, matching the architecture spec.
-#[derive(prost::Message, Serialize, Deserialize)]
+/// Protobuf message for recorded batches with embedded pool state, matching the architecture spec.
+#[derive(prost::Message, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordedBatch {
     #[prost(uint64, tag = "1")]
@@ -97,4 +97,38 @@ pub struct RecordedBatch {
     pub timestamp_ms: i64,
     #[prost(message, repeated, tag = "4")]
     pub transactions: Vec<ProtoTransaction>,
+    /// NEW: Embedded pool states for newly discovered pools in this batch
+    #[prost(message, repeated, tag = "5")]
+    pub pool_initializations: Vec<RecordedPoolState>,
+}
+
+/// Recorded pool state for historical replay consistency
+#[derive(prost::Message, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordedPoolState {
+    #[prost(string, tag = "1")]
+    pub pool_id: String,
+    #[prost(string, tag = "2")]
+    pub dex_name: String,
+    #[prost(string, tag = "3")]
+    pub token_a: String,
+    #[prost(string, tag = "4")]
+    pub token_b: String,
+    #[prost(string, tag = "5")]
+    pub reserve_a: String, // Decimal as string for precision
+    #[prost(string, tag = "6")]
+    pub reserve_b: String, // Decimal as string for precision
+    #[prost(string, tag = "7")]
+    pub fee_rate: String,  // Decimal as string for precision
+    #[prost(uint64, tag = "8")]
+    pub block_height: u64,
+    #[prost(bytes, tag = "9")]
+    pub additional_data: Vec<u8>, // JSON serialized DEX-specific data
+}
+
+/// Pool initialization event for detector integration
+#[derive(Debug, Clone)]
+pub struct PoolInitialization {
+    pub pool_state: RecordedPoolState,
+    pub timestamp: SystemTime,
 }
