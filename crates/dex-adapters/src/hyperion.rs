@@ -1,9 +1,9 @@
 //! Hyperion DEX adapter implementation for Aptos arbitrage bot
 
+use crate::{DexAdapter, PoolState};
 use anyhow::Result;
 use async_trait::async_trait;
 use common::types::{ClmmMarketUpdate, Event, MarketUpdate, TokenPair};
-use crate::{DexAdapter, PoolState};
 use serde::Deserialize;
 use serde_json::from_slice;
 use std::collections::HashMap;
@@ -37,7 +37,7 @@ impl HyperionAdapter {
 impl Default for HyperionAdapter {
     fn default() -> Self {
         Self::new(vec![
-            "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039".to_string()
+            "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039".to_string(),
         ])
     }
 }
@@ -93,10 +93,10 @@ impl DexAdapter for HyperionAdapter {
         // Hyperion REST API integration
         let client = reqwest::Client::new();
         let url = format!("https://api.hyperion.xyz/v1/pools/{}", pool_id);
-        
+
         let response = client.get(&url).send().await?;
         let pool_data: HyperionPoolResponse = response.json().await?;
-        
+
         Ok(PoolState {
             pool_id: pool_data.pool_id,
             dex_name: self.id().to_string(),

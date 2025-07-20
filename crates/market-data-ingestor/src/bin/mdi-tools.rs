@@ -1,14 +1,14 @@
-use std::path::PathBuf;
-use std::fs;
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use std::time::Instant;
 
-use clap::{Parser, Subcommand};
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use bytes::Buf;
+use clap::{Parser, Subcommand};
 use prost::Message;
 use serde_json::to_string_pretty;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 use market_data_ingestor::data_source::RecordedBatch;
 
@@ -272,42 +272,39 @@ fn main() -> Result<()> {
             max_batches,
             max_duration_seconds,
             verbose,
-        } => {
-            record_data(config, recording_config, output, max_batches, max_duration_seconds, verbose)
-        }
+        } => record_data(
+            config,
+            recording_config,
+            output,
+            max_batches,
+            max_duration_seconds,
+            verbose,
+        ),
         Commands::Convert {
             input,
             output,
             format,
             pretty,
             metadata,
-        } => {
-            convert_data(input, output, format, pretty, metadata)
-        }
+        } => convert_data(input, output, format, pretty, metadata),
         Commands::Validate {
             input,
             format,
             detailed,
-        } => {
-            validate_data(input, format, detailed)
-        }
+        } => validate_data(input, format, detailed),
         Commands::Info {
             input,
             detailed,
             pools,
             transactions,
             dex_stats,
-        } => {
-            show_file_info(input, detailed, pools, transactions, dex_stats)
-        }
+        } => show_file_info(input, detailed, pools, transactions, dex_stats),
         Commands::Merge {
             inputs,
             output,
             sort,
             deduplicate,
-        } => {
-            merge_files(inputs, output, sort, deduplicate)
-        }
+        } => merge_files(inputs, output, sort, deduplicate),
         Commands::Extract {
             input,
             output,
@@ -316,17 +313,21 @@ fn main() -> Result<()> {
             dex_filter,
             pool_filter,
             _tx_type_filter,
-        } => {
-            extract_data(input, output, start_time, end_time, dex_filter, pool_filter, _tx_type_filter)
-        }
+        } => extract_data(
+            input,
+            output,
+            start_time,
+            end_time,
+            dex_filter,
+            pool_filter,
+            _tx_type_filter,
+        ),
         Commands::Benchmark {
             input,
             iterations,
             operation,
             detailed,
-        } => {
-            benchmark_performance(input, iterations, operation, detailed)
-        }
+        } => benchmark_performance(input, iterations, operation, detailed),
     }
 }
 
@@ -339,34 +340,38 @@ fn record_data(
     verbose: bool,
 ) -> Result<()> {
     info!("Starting recording operation");
-    
+
     // Build command for mdi-recorder
     let mut cmd = std::process::Command::new("mdi-recorder");
     cmd.arg("--config-path").arg(&config);
     cmd.arg("--output").arg(&output);
-    
+
     if let Some(recording_config) = recording_config {
         cmd.arg("--recording-config").arg(recording_config);
     }
-    
+
     if let Some(max_batches) = max_batches {
         cmd.arg("--max-batches").arg(max_batches.to_string());
     }
-    
+
     if let Some(max_duration) = max_duration_seconds {
-        cmd.arg("--max-duration-seconds").arg(max_duration.to_string());
+        cmd.arg("--max-duration-seconds")
+            .arg(max_duration.to_string());
     }
-    
+
     if verbose {
         cmd.arg("--verbose");
     }
-    
+
     let status = cmd.status().context("Failed to execute mdi-recorder")?;
-    
+
     if !status.success() {
-        return Err(anyhow::anyhow!("Recording failed with exit code: {:?}", status.code()));
+        return Err(anyhow::anyhow!(
+            "Recording failed with exit code: {:?}",
+            status.code()
+        ));
     }
-    
+
     info!("Recording completed successfully");
     Ok(())
 }
@@ -379,7 +384,7 @@ fn convert_data(
     metadata: bool,
 ) -> Result<()> {
     info!("Converting {} to {}", input.display(), output.display());
-    
+
     match format.to_lowercase().as_str() {
         "json" => convert_to_json(input, output, pretty, metadata),
         "protobuf" | "pb" => convert_to_protobuf(input, output),
@@ -391,12 +396,12 @@ fn convert_to_json(input: PathBuf, output: PathBuf, pretty: bool, metadata: bool
     let data = fs::read(&input)?;
     let mut buf = bytes::BytesMut::from(&data[..]);
     let mut batches = Vec::new();
-    
+
     while buf.has_remaining() {
         let batch = RecordedBatch::decode_length_delimited(&mut buf)?;
         batches.push(batch);
     }
-    
+
     let json_output = if metadata {
         serde_json::json!({
             "metadata": {
@@ -409,13 +414,13 @@ fn convert_to_json(input: PathBuf, output: PathBuf, pretty: bool, metadata: bool
     } else {
         serde_json::json!(batches)
     };
-    
+
     let json_string = if pretty {
         to_string_pretty(&json_output)?
     } else {
         serde_json::to_string(&json_output)?
     };
-    
+
     fs::write(&output, json_string)?;
     info!("Converted to JSON: {}", output.display());
     Ok(())
@@ -424,19 +429,19 @@ fn convert_to_json(input: PathBuf, output: PathBuf, pretty: bool, metadata: bool
 fn convert_to_protobuf(input: PathBuf, output: PathBuf) -> Result<()> {
     let content = fs::read_to_string(&input)?;
     let json_data: serde_json::Value = serde_json::from_str(&content)?;
-    
+
     let batches: Vec<RecordedBatch> = if json_data.get("batches").is_some() {
         serde_json::from_value(json_data["batches"].clone())?
     } else {
         serde_json::from_value(json_data)?
     };
-    
+
     let mut output_data = Vec::new();
     for batch in batches {
         let encoded = batch.encode_length_delimited_to_vec();
         output_data.extend(encoded);
     }
-    
+
     fs::write(&output, output_data)?;
     info!("Converted to protobuf: {}", output.display());
     Ok(())
@@ -444,18 +449,22 @@ fn convert_to_protobuf(input: PathBuf, output: PathBuf) -> Result<()> {
 
 fn validate_data(input: PathBuf, format: Option<String>, detailed: bool) -> Result<()> {
     info!("Validating file: {}", input.display());
-    
+
     let format = format.unwrap_or_else(|| {
-        input.extension()
+        input
+            .extension()
             .and_then(|ext| ext.to_str())
             .map(|s| s.to_lowercase())
             .unwrap_or_else(|| "unknown".to_string())
     });
-    
+
     match format.as_str() {
         "pb" => validate_protobuf(input, detailed),
         "json" => validate_json(input, detailed),
-        _ => Err(anyhow::anyhow!("Unsupported format for validation: {}", format)),
+        _ => Err(anyhow::anyhow!(
+            "Unsupported format for validation: {}",
+            format
+        )),
     }
 }
 
@@ -464,7 +473,7 @@ fn validate_protobuf(input: PathBuf, detailed: bool) -> Result<()> {
     let mut buf = bytes::BytesMut::from(&data[..]);
     let mut batch_count = 0;
     let mut errors = 0;
-    
+
     while buf.has_remaining() {
         match RecordedBatch::decode_length_delimited(&mut buf) {
             Ok(batch) => {
@@ -486,19 +495,22 @@ fn validate_protobuf(input: PathBuf, detailed: bool) -> Result<()> {
             }
         }
     }
-    
+
     if errors == 0 {
         info!("Validation successful: {} batches processed", batch_count);
     } else {
-        warn!("Validation completed with {} errors in {} batches", errors, batch_count);
+        warn!(
+            "Validation completed with {} errors in {} batches",
+            errors, batch_count
+        );
     }
-    
+
     Ok(())
 }
 
 fn validate_json(input: PathBuf, detailed: bool) -> Result<()> {
     let content = fs::read_to_string(&input)?;
-    
+
     match serde_json::from_str::<Vec<RecordedBatch>>(&content) {
         Ok(batches) => {
             info!("JSON validation successful: {} batches", batches.len());
@@ -515,8 +527,12 @@ fn validate_json(input: PathBuf, detailed: bool) -> Result<()> {
             match serde_json::from_str::<serde_json::Value>(&content) {
                 Ok(value) => {
                     if value.get("batches").is_some() {
-                        let batches: Vec<RecordedBatch> = serde_json::from_value(value["batches"].clone())?;
-                        info!("JSON validation successful (with metadata): {} batches", batches.len());
+                        let batches: Vec<RecordedBatch> =
+                            serde_json::from_value(value["batches"].clone())?;
+                        info!(
+                            "JSON validation successful (with metadata): {} batches",
+                            batches.len()
+                        );
                     } else {
                         return Err(anyhow::anyhow!("Invalid JSON structure: {}", e));
                     }
@@ -525,7 +541,7 @@ fn validate_json(input: PathBuf, detailed: bool) -> Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -537,11 +553,11 @@ fn show_file_info(
     show_dex_stats: bool,
 ) -> Result<()> {
     info!("Analyzing file: {}", input.display());
-    
+
     let file_size = fs::metadata(&input)?.len();
     let data = fs::read(&input)?;
     let mut buf = bytes::BytesMut::from(&data[..]);
-    
+
     let mut info = FileInfo {
         file_size,
         batch_count: 0,
@@ -552,19 +568,19 @@ fn show_file_info(
         pool_breakdown: HashMap::new(),
         version_range: None,
     };
-    
+
     let mut min_time = i64::MAX;
     let mut max_time = i64::MIN;
     let mut min_version = u64::MAX;
     let mut max_version = u64::MIN;
-    
+
     while buf.has_remaining() {
         match RecordedBatch::decode_length_delimited(&mut buf) {
             Ok(batch) => {
                 info.batch_count += 1;
                 info.transaction_count += batch.transactions.len();
                 info.pool_state_count += batch.pool_initializations.len();
-                
+
                 // Track time range
                 if batch.timestamp_ms < min_time {
                     min_time = batch.timestamp_ms;
@@ -572,7 +588,7 @@ fn show_file_info(
                 if batch.timestamp_ms > max_time {
                     max_time = batch.timestamp_ms;
                 }
-                
+
                 // Track version range
                 if batch.start_version < min_version {
                     min_version = batch.start_version;
@@ -580,11 +596,17 @@ fn show_file_info(
                 if batch.end_version > max_version {
                     max_version = batch.end_version;
                 }
-                
+
                 // Track DEX and pool breakdown
                 for pool_state in &batch.pool_initializations {
-                    *info.dex_breakdown.entry(pool_state.dex_name.clone()).or_insert(0) += 1;
-                    *info.pool_breakdown.entry(pool_state.pool_id.clone()).or_insert(0) += 1;
+                    *info
+                        .dex_breakdown
+                        .entry(pool_state.dex_name.clone())
+                        .or_insert(0) += 1;
+                    *info
+                        .pool_breakdown
+                        .entry(pool_state.pool_id.clone())
+                        .or_insert(0) += 1;
                 }
             }
             Err(e) => {
@@ -592,16 +614,16 @@ fn show_file_info(
             }
         }
     }
-    
+
     if min_time != i64::MAX {
         info.time_range = Some((min_time, max_time));
     }
     if min_version != u64::MAX {
         info.version_range = Some((min_version, max_version));
     }
-    
+
     println!("{}", info.format_summary(detailed || show_dex_stats));
-    
+
     if show_pools && !info.pool_breakdown.is_empty() {
         println!("\nPool Details:");
         let mut pools: Vec<_> = info.pool_breakdown.iter().collect();
@@ -610,57 +632,54 @@ fn show_file_info(
             println!("  {}: {} occurrences", pool, count);
         }
     }
-    
+
     if show_transactions {
         println!("\nTransaction Statistics:");
-        println!("  Average transactions per batch: {:.2}", 
-                info.transaction_count as f64 / info.batch_count as f64);
+        println!(
+            "  Average transactions per batch: {:.2}",
+            info.transaction_count as f64 / info.batch_count as f64
+        );
     }
-    
+
     Ok(())
 }
 
-fn merge_files(
-    inputs: Vec<PathBuf>,
-    output: PathBuf,
-    sort: bool,
-    deduplicate: bool,
-) -> Result<()> {
+fn merge_files(inputs: Vec<PathBuf>, output: PathBuf, sort: bool, deduplicate: bool) -> Result<()> {
     info!("Merging {} files into {}", inputs.len(), output.display());
-    
+
     let mut all_batches = Vec::new();
-    
+
     for input_file in &inputs {
         info!("Reading file: {}", input_file.display());
         let data = fs::read(input_file)?;
         let mut buf = bytes::BytesMut::from(&data[..]);
-        
+
         while buf.has_remaining() {
             let batch = RecordedBatch::decode_length_delimited(&mut buf)?;
             all_batches.push(batch);
         }
     }
-    
+
     info!("Loaded {} batches total", all_batches.len());
-    
+
     if sort {
         info!("Sorting batches by timestamp");
         all_batches.sort_by_key(|batch| batch.timestamp_ms);
     }
-    
+
     if deduplicate {
         info!("Removing duplicate batches");
         all_batches.dedup_by_key(|batch| (batch.start_version, batch.end_version));
         info!("After deduplication: {} batches", all_batches.len());
     }
-    
+
     // Write merged output
     let mut output_data = Vec::new();
     for batch in all_batches {
         let encoded = batch.encode_length_delimited_to_vec();
         output_data.extend(encoded);
     }
-    
+
     fs::write(&output, output_data)?;
     info!("Merge completed: {}", output.display());
     Ok(())
@@ -675,22 +694,24 @@ fn extract_data(
     pool_filter: Option<String>,
     _tx_type_filter: Option<String>,
 ) -> Result<()> {
-    info!("Extracting data from {} to {}", input.display(), output.display());
-    
-    let dex_list: Option<Vec<String>> = dex_filter.map(|s| 
-        s.split(',').map(|s| s.trim().to_string()).collect()
+    info!(
+        "Extracting data from {} to {}",
+        input.display(),
+        output.display()
     );
-    let pool_list: Option<Vec<String>> = pool_filter.map(|s| 
-        s.split(',').map(|s| s.trim().to_string()).collect()
-    );
-    
+
+    let dex_list: Option<Vec<String>> =
+        dex_filter.map(|s| s.split(',').map(|s| s.trim().to_string()).collect());
+    let pool_list: Option<Vec<String>> =
+        pool_filter.map(|s| s.split(',').map(|s| s.trim().to_string()).collect());
+
     let data = fs::read(&input)?;
     let mut buf = bytes::BytesMut::from(&data[..]);
     let mut extracted_batches = Vec::new();
-    
+
     while buf.has_remaining() {
         let batch = RecordedBatch::decode_length_delimited(&mut buf)?;
-        
+
         // Apply time filter
         if let Some(start) = start_time {
             if batch.timestamp_ms < start * 1000 {
@@ -702,37 +723,41 @@ fn extract_data(
                 continue;
             }
         }
-        
+
         // Apply DEX filter
         if let Some(ref dex_list) = dex_list {
-            let has_matching_dex = batch.pool_initializations.iter()
+            let has_matching_dex = batch
+                .pool_initializations
+                .iter()
                 .any(|pool| dex_list.contains(&pool.dex_name));
             if !has_matching_dex && !batch.pool_initializations.is_empty() {
                 continue;
             }
         }
-        
+
         // Apply pool filter
         if let Some(ref pool_list) = pool_list {
-            let has_matching_pool = batch.pool_initializations.iter()
+            let has_matching_pool = batch
+                .pool_initializations
+                .iter()
                 .any(|pool| pool_list.contains(&pool.pool_id));
             if !has_matching_pool && !batch.pool_initializations.is_empty() {
                 continue;
             }
         }
-        
+
         extracted_batches.push(batch);
     }
-    
+
     info!("Extracted {} batches", extracted_batches.len());
-    
+
     // Write extracted data
     let mut output_data = Vec::new();
     for batch in extracted_batches {
         let encoded = batch.encode_length_delimited_to_vec();
         output_data.extend(encoded);
     }
-    
+
     fs::write(&output, output_data)?;
     info!("Extraction completed: {}", output.display());
     Ok(())
@@ -744,16 +769,20 @@ fn benchmark_performance(
     operation: String,
     detailed: bool,
 ) -> Result<()> {
-    info!("Benchmarking {} operation on {}", operation, input.display());
-    
+    info!(
+        "Benchmarking {} operation on {}",
+        operation,
+        input.display()
+    );
+
     let file_size = fs::metadata(&input)?.len();
     let file_size_mb = file_size as f64 / 1024.0 / 1024.0;
-    
+
     let mut times = Vec::new();
-    
+
     for i in 0..iterations {
         let start = Instant::now();
-        
+
         match operation.as_str() {
             "read" => {
                 let _ = fs::read(&input)?;
@@ -780,23 +809,28 @@ fn benchmark_performance(
                 }
                 let _ = serde_json::to_string(&batches)?;
             }
-            _ => return Err(anyhow::anyhow!("Unknown benchmark operation: {}", operation)),
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unknown benchmark operation: {}",
+                    operation
+                ))
+            }
         }
-        
+
         let elapsed = start.elapsed().as_millis() as u64;
         times.push(elapsed);
-        
+
         if detailed {
             info!("Iteration {}: {}ms", i + 1, elapsed);
         }
     }
-    
+
     let total_time = times.iter().sum::<u64>();
     let avg_time = total_time as f64 / iterations as f64;
     let min_time = *times.iter().min().unwrap();
     let max_time = *times.iter().max().unwrap();
     let throughput = (file_size_mb * iterations as f64) / (total_time as f64 / 1000.0);
-    
+
     let results = BenchmarkResults {
         operation,
         iterations,
@@ -807,7 +841,7 @@ fn benchmark_performance(
         throughput_mb_per_sec: throughput,
         file_size_mb,
     };
-    
+
     println!("{}", results.format_summary());
     Ok(())
 }

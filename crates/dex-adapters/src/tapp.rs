@@ -1,12 +1,12 @@
 //! Tapp DEX adapter implementation for Aptos arbitrage bot.
 
+use crate::{DexAdapter, PoolState};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use common::types::{
     ClmmMarketUpdate, ConstantProductMarketUpdate, Event, MarketUpdate, StableSwapMarketUpdate,
     TokenPair,
 };
-use crate::{DexAdapter, PoolState};
 use serde::Deserialize;
 use serde_json::from_slice;
 use std::collections::HashMap;
@@ -45,7 +45,7 @@ impl TappAdapter {
 impl Default for TappAdapter {
     fn default() -> Self {
         Self::new(vec![
-            "0xtapp_module_address".to_string() // Placeholder from config
+            "0xtapp_module_address".to_string(), // Placeholder from config
         ])
     }
 }
@@ -157,10 +157,10 @@ impl DexAdapter for TappAdapter {
         // Tapp REST API integration
         let client = reqwest::Client::new();
         let url = format!("https://api.tapp.xyz/v1/pools/{}", pool_id);
-        
+
         let response = client.get(&url).send().await?;
         let pool_data: TappPoolResponse = response.json().await?;
-        
+
         // Handle different pool types
         let (reserve_a, reserve_b) = match pool_data.pool_type.as_str() {
             "clmm" => {
@@ -168,7 +168,10 @@ impl DexAdapter for TappAdapter {
                 let sqrt_price = pool_data.sqrt_price.unwrap_or(0);
                 let liquidity = pool_data.liquidity.unwrap_or(0);
                 // Simplified calculation - real implementation would be more complex
-                (liquidity.to_string(), (liquidity / sqrt_price.max(1)).to_string())
+                (
+                    liquidity.to_string(),
+                    (liquidity / sqrt_price.max(1)).to_string(),
+                )
             }
             "constant_product" | "stable_swap" => {
                 if pool_data.reserves.len() >= 2 {
@@ -179,13 +182,13 @@ impl DexAdapter for TappAdapter {
             }
             _ => return Err(anyhow!("Unsupported pool type: {}", pool_data.pool_type)),
         };
-        
+
         let (token_a, token_b) = if pool_data.tokens.len() >= 2 {
             (pool_data.tokens[0].clone(), pool_data.tokens[1].clone())
         } else {
             return Err(anyhow!("Pool must have at least 2 tokens"));
         };
-        
+
         Ok(PoolState {
             pool_id: pool_data.pool_id,
             dex_name: self.id().to_string(),

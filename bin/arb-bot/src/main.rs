@@ -42,9 +42,15 @@ async fn main() -> Result<()> {
         }
 
         let adapter: Arc<dyn DexAdapter> = match adapter_config.name.as_str() {
-            "hyperion" => Arc::new(HyperionAdapter::new(vec![adapter_config.module_address.clone()])),
-            "thala" => Arc::new(ThalaAdapter::new(vec![adapter_config.module_address.clone()])),
-            "tapp" => Arc::new(TappAdapter::new(vec![adapter_config.module_address.clone()])),
+            "hyperion" => Arc::new(HyperionAdapter::new(vec![adapter_config
+                .module_address
+                .clone()])),
+            "thala" => Arc::new(ThalaAdapter::new(vec![adapter_config
+                .module_address
+                .clone()])),
+            "tapp" => Arc::new(TappAdapter::new(vec![adapter_config
+                .module_address
+                .clone()])),
             _ => {
                 anyhow::bail!("Unknown adapter: {}", adapter_config.name);
             }

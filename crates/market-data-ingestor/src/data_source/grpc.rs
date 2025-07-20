@@ -1,4 +1,4 @@
-use crate::data_source::{DataSource, DataSourceError, RawEvent, TimestampedEvent, EventMetadata};
+use crate::data_source::{DataSource, DataSourceError, EventMetadata, RawEvent, TimestampedEvent};
 use anyhow::Result;
 use aptos_indexer_processor_sdk::aptos_indexer_transaction_stream::{
     TransactionStream, TransactionStreamConfig,
@@ -66,7 +66,10 @@ impl GrpcSource {
         Self::with_reconnection_config(config, ReconnectionConfig::default())
     }
 
-    pub fn with_reconnection_config(config: TransactionStreamConfig, reconnection_config: ReconnectionConfig) -> Self {
+    pub fn with_reconnection_config(
+        config: TransactionStreamConfig,
+        reconnection_config: ReconnectionConfig,
+    ) -> Self {
         Self {
             inner: None,
             config,
@@ -84,10 +87,10 @@ impl GrpcSource {
     /// Attempt to establish a connection with timeout
     async fn connect(&mut self) -> Result<(), DataSourceError> {
         self.connection_state = ConnectionState::Connecting;
-        
+
         let connect_future = TransactionStream::new(self.config.clone());
         let timeout_future = tokio::time::sleep(self.reconnection_config.connection_timeout);
-        
+
         tokio::select! {
             result = connect_future => {
                 match result {
@@ -133,7 +136,7 @@ impl GrpcSource {
     async fn reconnect(&mut self) -> Result<(), DataSourceError> {
         if self.consecutive_failures >= self.reconnection_config.max_failures {
             let error_msg = format!(
-                "Maximum reconnection attempts ({}) exceeded", 
+                "Maximum reconnection attempts ({}) exceeded",
                 self.reconnection_config.max_failures
             );
             tracing::error!(
@@ -145,7 +148,7 @@ impl GrpcSource {
         }
 
         self.connection_state = ConnectionState::Reconnecting;
-        
+
         tracing::info!(
             delay = ?self.current_delay,
             attempt = self.consecutive_failures + 1,
@@ -162,7 +165,8 @@ impl GrpcSource {
         // Update delay for next attempt using exponential backoff
         if result.is_err() {
             let new_delay = Duration::from_millis(
-                (self.current_delay.as_millis() as f64 * self.reconnection_config.backoff_multiplier) as u64
+                (self.current_delay.as_millis() as f64
+                    * self.reconnection_config.backoff_multiplier) as u64,
             );
             self.current_delay = new_delay.min(self.reconnection_config.max_delay);
         }
@@ -217,16 +221,18 @@ impl DataSource for GrpcSource {
         if self.is_active {
             return Ok(());
         }
-        
+
         tracing::info!("Starting gRPC data source");
         self.connect().await?;
         self.is_active = true;
         Ok(())
     }
-    
+
     async fn next_event(&mut self) -> Result<Option<TimestampedEvent>, DataSourceError> {
         if !self.is_active {
-            return Err(DataSourceError::Internal("Data source not started".to_string()));
+            return Err(DataSourceError::Internal(
+                "Data source not started".to_string(),
+            ));
         }
 
         // Perform health check if needed
@@ -246,17 +252,27 @@ impl DataSource for GrpcSource {
                             Ok(batch) => {
                                 // Reset failure count on successful operation
                                 if self.consecutive_failures > 0 {
-                                    tracing::info!("Connection recovered after {} failures", self.consecutive_failures);
+                                    tracing::info!(
+                                        "Connection recovered after {} failures",
+                                        self.consecutive_failures
+                                    );
                                     self.consecutive_failures = 0;
                                     self.current_delay = self.reconnection_config.initial_delay;
                                 }
 
                                 // Convert the first transaction in the batch to a TimestampedEvent
                                 if let Some(transaction) = batch.transactions.into_iter().next() {
-                                    let blockchain_timestamp = transaction.timestamp
-                                        .and_then(|ts| UNIX_EPOCH.checked_add(Duration::from_secs(ts.seconds as u64))
-                                            .and_then(|t| t.checked_add(Duration::from_nanos(ts.nanos as u64))));
-                                    
+                                    let blockchain_timestamp =
+                                        transaction.timestamp.and_then(|ts| {
+                                            UNIX_EPOCH
+                                                .checked_add(Duration::from_secs(ts.seconds as u64))
+                                                .and_then(|t| {
+                                                    t.checked_add(Duration::from_nanos(
+                                                        ts.nanos as u64,
+                                                    ))
+                                                })
+                                        });
+
                                     let raw_event = RawEvent {
                                         transaction,
                                         metadata: EventMetadata {
@@ -266,14 +282,14 @@ impl DataSource for GrpcSource {
                                             size_bytes: Some(batch.size_in_bytes),
                                         },
                                     };
-                                    
+
                                     let timestamped_event = TimestampedEvent {
                                         raw_event,
                                         received_at: SystemTime::now(),
                                         blockchain_timestamp,
                                         sequence: self.sequence_counter,
                                     };
-                                    
+
                                     self.sequence_counter += 1;
                                     return Ok(Some(timestamped_event));
                                 } else {
@@ -311,7 +327,7 @@ impl DataSource for GrpcSource {
             }
         }
     }
-    
+
     async fn stop(&mut self) -> Result<(), DataSourceError> {
         tracing::info!("Stopping gRPC data source");
         self.inner = None;
@@ -319,11 +335,11 @@ impl DataSource for GrpcSource {
         self.connection_state = ConnectionState::Disconnected;
         Ok(())
     }
-    
+
     fn is_active(&self) -> bool {
         self.is_active
     }
-    
+
     fn source_type(&self) -> &'static str {
         "grpc"
     }
@@ -336,7 +352,7 @@ mod tests {
     #[test]
     fn test_reconnection_config_default() {
         let config = ReconnectionConfig::default();
-        
+
         assert_eq!(config.initial_delay, Duration::from_millis(100));
         assert_eq!(config.max_delay, Duration::from_secs(30));
         assert_eq!(config.backoff_multiplier, 2.0);
@@ -355,7 +371,7 @@ mod tests {
             connection_timeout: Duration::from_secs(5),
             health_check_interval: Duration::from_secs(15),
         };
-        
+
         assert_eq!(config.initial_delay, Duration::from_millis(50));
         assert_eq!(config.max_delay, Duration::from_secs(60));
         assert_eq!(config.backoff_multiplier, 1.5);
@@ -368,16 +384,16 @@ mod tests {
     fn test_connection_state_enum() {
         let state = ConnectionState::Disconnected;
         assert_eq!(state, ConnectionState::Disconnected);
-        
+
         let state = ConnectionState::Connecting;
         assert_eq!(state, ConnectionState::Connecting);
-        
+
         let state = ConnectionState::Connected;
         assert_eq!(state, ConnectionState::Connected);
-        
+
         let state = ConnectionState::Reconnecting;
         assert_eq!(state, ConnectionState::Reconnecting);
-        
+
         let state = ConnectionState::Failed;
         assert_eq!(state, ConnectionState::Failed);
     }
@@ -393,14 +409,20 @@ mod tests {
             connection_timeout: Duration::from_secs(5),
             health_check_interval: Duration::from_secs(10),
         };
-        
+
         // Test that we can create a ReconnectionConfig with custom values
         assert_eq!(reconnection_config.initial_delay, Duration::from_millis(50));
         assert_eq!(reconnection_config.max_delay, Duration::from_secs(10));
         assert_eq!(reconnection_config.backoff_multiplier, 1.5);
         assert_eq!(reconnection_config.max_failures, 3);
-        assert_eq!(reconnection_config.connection_timeout, Duration::from_secs(5));
-        assert_eq!(reconnection_config.health_check_interval, Duration::from_secs(10));
+        assert_eq!(
+            reconnection_config.connection_timeout,
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            reconnection_config.health_check_interval,
+            Duration::from_secs(10)
+        );
     }
 
     // Note: Complex gRPC configuration tests are omitted due to TransactionStreamConfig complexity
@@ -411,11 +433,14 @@ mod tests {
         // Test timeout error
         let error = DataSourceError::Timeout("Connection timeout".to_string());
         assert_eq!(error.to_string(), "Timeout occurred: Connection timeout");
-        
+
         // Test connection failed error
         let error = DataSourceError::ConnectionFailed("gRPC connection failed".to_string());
-        assert_eq!(error.to_string(), "Connection failed: gRPC connection failed");
-        
+        assert_eq!(
+            error.to_string(),
+            "Connection failed: gRPC connection failed"
+        );
+
         // Test stream ended error
         let error = DataSourceError::StreamEnded;
         assert_eq!(error.to_string(), "Stream ended unexpectedly");

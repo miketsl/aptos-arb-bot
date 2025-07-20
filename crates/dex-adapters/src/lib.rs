@@ -34,20 +34,23 @@ pub trait DexAdapter: Send + Sync {
     async fn fetch_pool_state(&self, pool_id: &str) -> Result<PoolState>;
 }
 
+mod event_router;
 mod hyperion;
 mod tapp;
 mod thala;
-mod event_router;
 
+pub use event_router::EventRouter;
 pub use hyperion::HyperionAdapter;
 pub use tapp::TappAdapter;
 pub use thala::ThalaAdapter;
-pub use event_router::EventRouter;
 
 /// Create a DEX adapter from configuration
-pub fn create_adapter_from_config(name: &str, module_address: String) -> Result<Box<dyn DexAdapter>> {
+pub fn create_adapter_from_config(
+    name: &str,
+    module_address: String,
+) -> Result<Box<dyn DexAdapter>> {
     let module_addresses = vec![module_address];
-    
+
     match name.to_lowercase().as_str() {
         "hyperion" => Ok(Box::new(HyperionAdapter::new(module_addresses))),
         "thalaswap" | "thala" => Ok(Box::new(ThalaAdapter::new(module_addresses))),

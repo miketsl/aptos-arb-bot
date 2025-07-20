@@ -1,9 +1,9 @@
 //! Thala DEX adapter implementation for Aptos arbitrage bot.
 
+use crate::{DexAdapter, PoolState};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use common::types::{Event, MarketUpdate, TokenPair, WeightedPoolMarketUpdate};
-use crate::{DexAdapter, PoolState};
 use serde::Deserialize;
 use serde_json::from_slice;
 
@@ -36,7 +36,7 @@ impl ThalaAdapter {
 impl Default for ThalaAdapter {
     fn default() -> Self {
         Self::new(vec![
-            "0x48271d39d0b05bd6efca2278f22277d6fcc375504f9839fd73f74ace240861af".to_string()
+            "0x48271d39d0b05bd6efca2278f22277d6fcc375504f9839fd73f74ace240861af".to_string(),
         ])
     }
 }
@@ -106,10 +106,10 @@ impl DexAdapter for ThalaAdapter {
         // Thala REST API integration
         let client = reqwest::Client::new();
         let url = format!("https://api.thala.fi/v1/pools/{}", pool_id);
-        
+
         let response = client.get(&url).send().await?;
         let pool_data: ThalaPoolResponse = response.json().await?;
-        
+
         // For weighted pools, use first two tokens as primary pair
         let (token_a, token_b) = if pool_data.tokens.len() >= 2 {
             (pool_data.tokens[0].clone(), pool_data.tokens[1].clone())
@@ -122,7 +122,7 @@ impl DexAdapter for ThalaAdapter {
         } else {
             return Err(anyhow!("Pool must have at least 2 reserves"));
         };
-        
+
         Ok(PoolState {
             pool_id: pool_data.pool_id,
             dex_name: self.id().to_string(),

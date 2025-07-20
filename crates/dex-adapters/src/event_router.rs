@@ -25,9 +25,10 @@ impl EventRouter {
     pub fn register_adapter(&mut self, adapter: Arc<dyn DexAdapter>) {
         // Register all module addresses for this adapter
         for module_address in adapter.module_addresses() {
-            self.adapters.insert(module_address.clone(), adapter.clone());
+            self.adapters
+                .insert(module_address.clone(), adapter.clone());
         }
-        
+
         // Keep track of all adapters
         if !self.all_adapters.iter().any(|a| a.id() == adapter.id()) {
             self.all_adapters.push(adapter);
@@ -38,7 +39,7 @@ impl EventRouter {
     pub fn route_event(&self, event: &Event) -> Result<Option<MarketUpdate>> {
         // Extract module address from event (this would need to be implemented based on event structure)
         let module_address = self.extract_module_address(event)?;
-        
+
         // Find the appropriate adapter
         if let Some(adapter) = self.adapters.get(&module_address) {
             adapter.parse_event(event)
@@ -51,16 +52,16 @@ impl EventRouter {
     /// Extract pool IDs from an event using all registered adapters
     pub fn extract_pool_ids(&self, event: &Event) -> Result<Vec<String>> {
         let mut all_pool_ids = Vec::new();
-        
+
         for adapter in &self.all_adapters {
             let pool_ids = adapter.extract_pool_ids(event)?;
             all_pool_ids.extend(pool_ids);
         }
-        
+
         // Remove duplicates
         all_pool_ids.sort();
         all_pool_ids.dedup();
-        
+
         Ok(all_pool_ids)
     }
 
@@ -72,7 +73,7 @@ impl EventRouter {
                 return adapter.fetch_pool_state(pool_id).await;
             }
         }
-        
+
         Err(anyhow::anyhow!("No adapter found for DEX: {}", dex_name))
     }
 
@@ -83,7 +84,8 @@ impl EventRouter {
 
     /// Get adapter by DEX name
     pub fn get_adapter(&self, dex_name: &str) -> Option<Arc<dyn DexAdapter>> {
-        self.all_adapters.iter()
+        self.all_adapters
+            .iter()
             .find(|adapter| adapter.id() == dex_name)
             .cloned()
     }
@@ -93,10 +95,10 @@ impl EventRouter {
     fn extract_module_address(&self, event: &Event) -> Result<String> {
         // This is a placeholder implementation
         // In practice, this would extract the module address from the event's type or metadata
-        
+
         // For now, try to match against known patterns in event data
         let event_str = &event.data;
-        
+
         // Check for known DEX patterns
         if event_str.contains("hyperion") {
             Ok("0x1::hyperion::pool".to_string())
@@ -106,7 +108,9 @@ impl EventRouter {
             Ok("0x3::tapp::pool".to_string())
         } else {
             // Default to first registered module if no match
-            self.adapters.keys().next()
+            self.adapters
+                .keys()
+                .next()
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("No adapters registered"))
         }
@@ -122,7 +126,7 @@ impl Default for EventRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HyperionAdapter, ThalaAdapter, TappAdapter};
+    use crate::{HyperionAdapter, TappAdapter, ThalaAdapter};
     use common::types::Event;
 
     #[test]
@@ -135,30 +139,30 @@ mod tests {
     #[test]
     fn test_register_adapters() {
         let mut router = EventRouter::new();
-        
+
         let hyperion = Arc::new(HyperionAdapter::default());
         let thala = Arc::new(ThalaAdapter::default());
         let tapp = Arc::new(TappAdapter::default());
-        
+
         router.register_adapter(hyperion.clone());
         router.register_adapter(thala.clone());
         router.register_adapter(tapp.clone());
-        
+
         assert_eq!(router.all_adapters.len(), 3);
-        assert!(router.adapters.len() > 0); // Should have module address mappings
+        assert!(!router.adapters.is_empty()); // Should have module address mappings
     }
 
     #[test]
     fn test_get_adapter_by_name() {
         let mut router = EventRouter::new();
-        
+
         let hyperion = Arc::new(HyperionAdapter::default());
         router.register_adapter(hyperion.clone());
-        
+
         let found = router.get_adapter("hyperion");
         assert!(found.is_some());
         assert_eq!(found.unwrap().id(), "hyperion");
-        
+
         let not_found = router.get_adapter("nonexistent");
         assert!(not_found.is_none());
     }
@@ -166,14 +170,14 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_pool_state_routing() {
         let mut router = EventRouter::new();
-        
+
         let hyperion = Arc::new(HyperionAdapter::default());
         router.register_adapter(hyperion.clone());
-        
+
         // This would fail in practice due to network call, but tests the routing logic
         let result = router.fetch_pool_state("test_pool", "hyperion").await;
         assert!(result.is_err()); // Expected to fail due to network call
-        
+
         // Test with unknown DEX
         let result = router.fetch_pool_state("test_pool", "unknown").await;
         assert!(result.is_err());
@@ -183,16 +187,16 @@ mod tests {
     #[test]
     fn test_extract_module_address() {
         let mut router = EventRouter::new();
-        
+
         // Register an adapter first
         let hyperion = Arc::new(HyperionAdapter::default());
         router.register_adapter(hyperion.clone());
-        
+
         let hyperion_event = Event {
             data: r#"{"pool_id": "0x123", "dex": "hyperion"}"#.to_string(),
             ..Default::default()
         };
-        
+
         let result = router.extract_module_address(&hyperion_event);
         assert!(result.is_ok());
         assert!(result.unwrap().contains("hyperion"));
@@ -201,16 +205,16 @@ mod tests {
     #[test]
     fn test_extract_pool_ids() {
         let mut router = EventRouter::new();
-        
+
         let hyperion = Arc::new(HyperionAdapter::default());
         router.register_adapter(hyperion.clone());
-        
+
         let event = Event {
             data: r#"{"pool_id": "test_pool_123"}"#.to_string(),
             ..Default::default()
         };
-        
-        let pool_ids = router.extract_pool_ids(&event).unwrap();
+
+        let _pool_ids = router.extract_pool_ids(&event).unwrap();
         // The actual result depends on the adapter implementation
         // Just verify we get a valid result (could be empty)
     }

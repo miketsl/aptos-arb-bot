@@ -1,12 +1,12 @@
+use anyhow::{Context, Result};
 use bytes::Buf;
-use std::path::PathBuf;
-use std::fs::{File, create_dir_all};
-use std::io::{BufWriter, Write};
 use clap::{Parser, Subcommand};
 use prost::Message;
-use serde_json::{to_string_pretty, from_str};
-use anyhow::{Result, Context};
-use tracing::{info, warn, error};
+use serde_json::{from_str, to_string_pretty};
+use std::fs::{create_dir_all, File};
+use std::io::{BufWriter, Write};
+use std::path::PathBuf;
+use tracing::{error, info, warn};
 
 use market_data_ingestor::data_source::RecordedBatch;
 
@@ -275,7 +275,9 @@ impl ConversionFilter {
 
         // DEX filter
         if let Some(ref dex_list) = self.dex_filter {
-            let has_matching_dex = batch.pool_initializations.iter()
+            let has_matching_dex = batch
+                .pool_initializations
+                .iter()
                 .any(|pool| dex_list.contains(&pool.dex_name));
             if !has_matching_dex && !batch.pool_initializations.is_empty() {
                 return false;
@@ -284,7 +286,9 @@ impl ConversionFilter {
 
         // Pool filter
         if let Some(ref pool_list) = self.pool_filter {
-            let has_matching_pool = batch.pool_initializations.iter()
+            let has_matching_pool = batch
+                .pool_initializations
+                .iter()
                 .any(|pool| pool_list.contains(&pool.pool_id));
             if !has_matching_pool && !batch.pool_initializations.is_empty() {
                 return false;
@@ -324,11 +328,29 @@ fn main() -> Result<()> {
                 exclude_transactions,
                 pool_states_only,
             };
-            
+
             if batch {
-                convert_to_json_batch(input, output, pretty, include_metadata, filter, options, compress, stats)
+                convert_to_json_batch(
+                    input,
+                    output,
+                    pretty,
+                    include_metadata,
+                    filter,
+                    options,
+                    compress,
+                    stats,
+                )
             } else {
-                convert_to_json_single(input, output, pretty, include_metadata, filter, options, compress, stats)
+                convert_to_json_single(
+                    input,
+                    output,
+                    pretty,
+                    include_metadata,
+                    filter,
+                    options,
+                    compress,
+                    stats,
+                )
             }
         }
         Commands::ToProtobuf {
@@ -342,9 +364,25 @@ fn main() -> Result<()> {
             stats,
         } => {
             if batch {
-                convert_to_protobuf_batch(input, output, validate, strict, repair, backup_original, stats)
+                convert_to_protobuf_batch(
+                    input,
+                    output,
+                    validate,
+                    strict,
+                    repair,
+                    backup_original,
+                    stats,
+                )
             } else {
-                convert_to_protobuf_single(input, output, validate, strict, repair, backup_original, stats)
+                convert_to_protobuf_single(
+                    input,
+                    output,
+                    validate,
+                    strict,
+                    repair,
+                    backup_original,
+                    stats,
+                )
             }
         }
         Commands::Validate {
@@ -370,18 +408,21 @@ fn main() -> Result<()> {
             pool_breakdown,
             dex_breakdown,
             time_range_analysis,
-        } => {
-            show_file_info(input, detailed, export_csv, pool_breakdown, dex_breakdown, time_range_analysis)
-        }
+        } => show_file_info(
+            input,
+            detailed,
+            export_csv,
+            pool_breakdown,
+            dex_breakdown,
+            time_range_analysis,
+        ),
         Commands::Diff {
             file1,
             file2,
             output,
             ignore_timestamps,
             pool_states_only,
-        } => {
-            compare_files(file1, file2, output, ignore_timestamps, pool_states_only)
-        }
+        } => compare_files(file1, file2, output, ignore_timestamps, pool_states_only),
         Commands::Batch {
             input_dir,
             output_dir,
@@ -391,9 +432,16 @@ fn main() -> Result<()> {
             progress,
             resume,
             _continue_on_error,
-        } => {
-            process_batch_operation(input_dir, output_dir, operation, _pattern, workers, progress, resume, _continue_on_error)
-        }
+        } => process_batch_operation(
+            input_dir,
+            output_dir,
+            operation,
+            _pattern,
+            workers,
+            progress,
+            resume,
+            _continue_on_error,
+        ),
     }
 }
 
@@ -408,16 +456,20 @@ fn convert_to_json_single(
     compress: bool,
     generate_stats: bool,
 ) -> Result<()> {
-    info!("Converting protobuf to JSON: {} -> {}", input.display(), output.display());
-    
+    info!(
+        "Converting protobuf to JSON: {} -> {}",
+        input.display(),
+        output.display()
+    );
+
     let mut stats = ConversionStats::default();
     let data = std::fs::read(&input)?;
     stats.bytes_processed = data.len() as u64;
     stats.files_processed = 1;
-    
+
     let mut buf = bytes::BytesMut::from(&data[..]);
     let mut batches = Vec::new();
-    
+
     while buf.has_remaining() {
         match RecordedBatch::decode_length_delimited(&mut buf) {
             Ok(batch) => {
@@ -434,7 +486,7 @@ fn convert_to_json_single(
             }
         }
     }
-    
+
     // Create JSON output
     let json_data = if include_metadata {
         create_json_with_metadata(&batches, &stats)?
@@ -445,14 +497,14 @@ fn convert_to_json_single(
             serde_json::to_string(&batches)?
         }
     };
-    
+
     // Write output
     write_output(&output, json_data.as_bytes(), compress)?;
-    
+
     if generate_stats {
         println!("{}", stats.format_summary());
     }
-    
+
     info!("Conversion completed successfully");
     Ok(())
 }
@@ -468,20 +520,23 @@ fn convert_to_json_batch(
     compress: bool,
     generate_stats: bool,
 ) -> Result<()> {
-    info!("Converting protobuf files in batch mode: {} -> {}", input_dir.display(), output_dir.display());
-    
+    info!(
+        "Converting protobuf files in batch mode: {} -> {}",
+        input_dir.display(),
+        output_dir.display()
+    );
+
     create_dir_all(&output_dir)?;
     let mut total_stats = ConversionStats::default();
-    
+
     for entry in std::fs::read_dir(&input_dir)? {
         let entry = entry?;
         let path = entry.path();
-        
+
         if path.extension().and_then(|s| s.to_str()) == Some("pb") {
-            let output_file = output_dir.join(
-                path.file_stem().unwrap().to_str().unwrap().to_string() + ".json"
-            );
-            
+            let output_file =
+                output_dir.join(path.file_stem().unwrap().to_str().unwrap().to_string() + ".json");
+
             match convert_to_json_single(
                 path.clone(),
                 output_file,
@@ -503,11 +558,11 @@ fn convert_to_json_batch(
             }
         }
     }
-    
+
     if generate_stats {
         println!("{}", total_stats.format_summary());
     }
-    
+
     Ok(())
 }
 
@@ -521,45 +576,49 @@ fn convert_to_protobuf_single(
     backup_original: bool,
     generate_stats: bool,
 ) -> Result<()> {
-    info!("Converting JSON to protobuf: {} -> {}", input.display(), output.display());
-    
+    info!(
+        "Converting JSON to protobuf: {} -> {}",
+        input.display(),
+        output.display()
+    );
+
     let mut stats = ConversionStats::default();
     let content = std::fs::read_to_string(&input)?;
     stats.files_processed = 1;
-    
+
     let batches: Vec<RecordedBatch> = if repair {
         repair_and_parse_json(&content, &mut stats)?
     } else {
         from_str(&content).context("Failed to parse JSON")?
     };
-    
+
     stats.batches_processed = batches.len();
     for batch in &batches {
         stats.transactions_processed += batch.transactions.len();
         stats.pool_states_processed += batch.pool_initializations.len();
     }
-    
+
     // Write protobuf output
     let file = File::create(&output)?;
     let mut writer = BufWriter::new(file);
-    
+
     for batch in &batches {
         let encoded = batch.encode_length_delimited_to_vec();
         writer.write_all(&encoded)?;
         stats.bytes_processed += encoded.len() as u64;
     }
-    
+
     writer.flush()?;
-    
+
     // Validate if requested
     if validate {
         validate_conversion(&output, &batches)?;
     }
-    
+
     if generate_stats {
         println!("{}", stats.format_summary());
     }
-    
+
     info!("Conversion completed successfully");
     Ok(())
 }
@@ -574,20 +633,23 @@ fn convert_to_protobuf_batch(
     backup_original: bool,
     generate_stats: bool,
 ) -> Result<()> {
-    info!("Converting JSON files in batch mode: {} -> {}", input_dir.display(), output_dir.display());
-    
+    info!(
+        "Converting JSON files in batch mode: {} -> {}",
+        input_dir.display(),
+        output_dir.display()
+    );
+
     create_dir_all(&output_dir)?;
     let mut total_stats = ConversionStats::default();
-    
+
     for entry in std::fs::read_dir(&input_dir)? {
         let entry = entry?;
         let path = entry.path();
-        
+
         if path.extension().and_then(|s| s.to_str()) == Some("json") {
-            let output_file = output_dir.join(
-                path.file_stem().unwrap().to_str().unwrap().to_string() + ".pb"
-            );
-            
+            let output_file =
+                output_dir.join(path.file_stem().unwrap().to_str().unwrap().to_string() + ".pb");
+
             match convert_to_protobuf_single(
                 path.clone(),
                 output_file,
@@ -608,40 +670,44 @@ fn convert_to_protobuf_batch(
             }
         }
     }
-    
+
     if generate_stats {
         println!("{}", total_stats.format_summary());
     }
-    
+
     Ok(())
 }
 
 /// Validate single file pair
 fn validate_single(
-    protobuf: PathBuf, 
-    json: PathBuf, 
+    protobuf: PathBuf,
+    json: PathBuf,
     cycles: u32,
     detailed: bool,
     report: Option<PathBuf>,
     _temp_dir: Option<PathBuf>,
     _parallel: usize,
 ) -> Result<()> {
-    info!("Validating conversion: {} <-> {}", protobuf.display(), json.display());
-    
+    info!(
+        "Validating conversion: {} <-> {}",
+        protobuf.display(),
+        json.display()
+    );
+
     // Read and parse both files
     let pb_data = std::fs::read(&protobuf)?;
     let json_content = std::fs::read_to_string(&json)?;
-    
+
     let mut pb_batches = Vec::new();
     let mut buf = bytes::BytesMut::from(&pb_data[..]);
-    
+
     while buf.has_remaining() {
         let batch = RecordedBatch::decode_length_delimited(&mut buf)?;
         pb_batches.push(batch);
     }
-    
+
     let json_batches: Vec<RecordedBatch> = from_str(&json_content)?;
-    
+
     // Compare
     if pb_batches.len() != json_batches.len() {
         return Err(anyhow::anyhow!(
@@ -650,7 +716,7 @@ fn validate_single(
             json_batches.len()
         ));
     }
-    
+
     for (i, (pb_batch, json_batch)) in pb_batches.iter().zip(json_batches.iter()).enumerate() {
         if detailed {
             validate_batch_detailed(pb_batch, json_batch, i)?;
@@ -658,35 +724,38 @@ fn validate_single(
             validate_batch_basic(pb_batch, json_batch, i)?;
         }
     }
-    
+
     info!("Validation completed successfully");
     Ok(())
 }
 
 /// Validate batch of file pairs
 fn validate_batch(
-    protobuf_dir: PathBuf, 
-    json_dir: PathBuf, 
+    protobuf_dir: PathBuf,
+    json_dir: PathBuf,
     cycles: u32,
     detailed: bool,
     report: Option<PathBuf>,
     _temp_dir: Option<PathBuf>,
     _parallel: usize,
 ) -> Result<()> {
-    info!("Validating files in batch mode: {} <-> {}", protobuf_dir.display(), json_dir.display());
-    
+    info!(
+        "Validating files in batch mode: {} <-> {}",
+        protobuf_dir.display(),
+        json_dir.display()
+    );
+
     let mut validated = 0;
     let mut errors = 0;
-    
+
     for entry in std::fs::read_dir(&protobuf_dir)? {
         let entry = entry?;
         let pb_path = entry.path();
-        
+
         if pb_path.extension().and_then(|s| s.to_str()) == Some("pb") {
-            let json_path = json_dir.join(
-                pb_path.file_stem().unwrap().to_str().unwrap().to_string() + ".json"
-            );
-            
+            let json_path =
+                json_dir.join(pb_path.file_stem().unwrap().to_str().unwrap().to_string() + ".json");
+
             if json_path.exists() {
                 match validate_single(pb_path.clone(), json_path, cycles, detailed, None, None, 1) {
                     Ok(_) => {
@@ -703,8 +772,11 @@ fn validate_batch(
             }
         }
     }
-    
-    info!("Validation completed: {} validated, {} errors", validated, errors);
+
+    info!(
+        "Validation completed: {} validated, {} errors",
+        validated, errors
+    );
     Ok(())
 }
 
@@ -720,17 +792,17 @@ fn process_batch_operation(
     _continue_on_error: bool,
 ) -> Result<()> {
     info!("Processing batch operation: {}", operation);
-    
+
     // This is a placeholder for the parallel processing implementation
     // In a full implementation, you would use tokio tasks or thread pools
-    
+
     match operation.as_str() {
         "to-json" => {
             convert_to_json_batch(
                 input_dir,
                 output_dir,
-                true,  // pretty
-                true,  // include_metadata
+                true, // pretty
+                true, // include_metadata
                 ConversionFilter::from_args(None, None, None, None),
                 ConversionOptions::default(),
                 false, // compress
@@ -739,18 +811,14 @@ fn process_batch_operation(
         }
         "to-protobuf" => {
             convert_to_protobuf_batch(
-                input_dir,
-                output_dir,
-                true,  // validate
+                input_dir, output_dir, true,  // validate
                 false, // strict
                 false, // repair
                 false, // backup_original
                 true,  // stats
             )
         }
-        "validate" => {
-            validate_batch(input_dir, output_dir, 1, false, None, None, 1)
-        }
+        "validate" => validate_batch(input_dir, output_dir, 1, false, None, None, 1),
         _ => Err(anyhow::anyhow!("Unknown operation: {}", operation)),
     }
 }
@@ -771,7 +839,7 @@ fn create_json_with_metadata(batches: &[RecordedBatch], stats: &ConversionStats)
         },
         "batches": batches
     });
-    
+
     Ok(to_string_pretty(&output)?)
 }
 
@@ -780,7 +848,7 @@ fn write_output(path: &PathBuf, data: &[u8], compress: bool) -> Result<()> {
         // Implement compression if needed
         warn!("Compression not yet implemented, writing uncompressed");
     }
-    
+
     std::fs::write(path, data)?;
     Ok(())
 }
@@ -801,36 +869,51 @@ fn validate_conversion(output_path: &PathBuf, original_batches: &[RecordedBatch]
     let data = std::fs::read(output_path)?;
     let mut buf = bytes::BytesMut::from(&data[..]);
     let mut decoded_batches = Vec::new();
-    
+
     while buf.has_remaining() {
         let batch = RecordedBatch::decode_length_delimited(&mut buf)?;
         decoded_batches.push(batch);
     }
-    
+
     if decoded_batches.len() != original_batches.len() {
         return Err(anyhow::anyhow!("Batch count mismatch after conversion"));
     }
-    
+
     Ok(())
 }
 
-fn validate_batch_basic(pb_batch: &RecordedBatch, json_batch: &RecordedBatch, index: usize) -> Result<()> {
-    if pb_batch.start_version != json_batch.start_version ||
-       pb_batch.end_version != json_batch.end_version ||
-       pb_batch.transactions.len() != json_batch.transactions.len() {
-        return Err(anyhow::anyhow!("Basic validation failed for batch {}", index));
+fn validate_batch_basic(
+    pb_batch: &RecordedBatch,
+    json_batch: &RecordedBatch,
+    index: usize,
+) -> Result<()> {
+    if pb_batch.start_version != json_batch.start_version
+        || pb_batch.end_version != json_batch.end_version
+        || pb_batch.transactions.len() != json_batch.transactions.len()
+    {
+        return Err(anyhow::anyhow!(
+            "Basic validation failed for batch {}",
+            index
+        ));
     }
     Ok(())
 }
 
-fn validate_batch_detailed(pb_batch: &RecordedBatch, json_batch: &RecordedBatch, index: usize) -> Result<()> {
+fn validate_batch_detailed(
+    pb_batch: &RecordedBatch,
+    json_batch: &RecordedBatch,
+    index: usize,
+) -> Result<()> {
     validate_batch_basic(pb_batch, json_batch, index)?;
-    
+
     // Add more detailed validation here
     if pb_batch.pool_initializations.len() != json_batch.pool_initializations.len() {
-        return Err(anyhow::anyhow!("Pool initialization count mismatch for batch {}", index));
+        return Err(anyhow::anyhow!(
+            "Pool initialization count mismatch for batch {}",
+            index
+        ));
     }
-    
+
     Ok(())
 }
 
@@ -844,10 +927,10 @@ fn show_file_info(
     time_range_analysis: bool,
 ) -> Result<()> {
     info!("Analyzing file: {}", input.display());
-    
+
     let data = std::fs::read(&input)?;
     let mut buf = bytes::BytesMut::from(&data[..]);
-    
+
     let mut batch_count = 0;
     let mut transaction_count = 0;
     let mut pool_state_count = 0;
@@ -855,21 +938,21 @@ fn show_file_info(
     let mut max_time = i64::MIN;
     let mut dex_stats = std::collections::HashMap::new();
     let mut pool_stats = std::collections::HashMap::new();
-    
+
     while buf.has_remaining() {
         match RecordedBatch::decode_length_delimited(&mut buf) {
             Ok(batch) => {
                 batch_count += 1;
                 transaction_count += batch.transactions.len();
                 pool_state_count += batch.pool_initializations.len();
-                
+
                 if batch.timestamp_ms < min_time {
                     min_time = batch.timestamp_ms;
                 }
                 if batch.timestamp_ms > max_time {
                     max_time = batch.timestamp_ms;
                 }
-                
+
                 for pool_state in &batch.pool_initializations {
                     *dex_stats.entry(pool_state.dex_name.clone()).or_insert(0) += 1;
                     *pool_stats.entry(pool_state.pool_id.clone()).or_insert(0) += 1;
@@ -880,14 +963,14 @@ fn show_file_info(
             }
         }
     }
-    
+
     // Display basic info
     println!("File Information:");
     println!("  File Size: {:.2} MB", data.len() as f64 / 1024.0 / 1024.0);
     println!("  Batches: {}", batch_count);
     println!("  Transactions: {}", transaction_count);
     println!("  Pool States: {}", pool_state_count);
-    
+
     if time_range_analysis && min_time != i64::MAX {
         let start_time = chrono::DateTime::from_timestamp(min_time / 1000, 0)
             .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
@@ -895,18 +978,21 @@ fn show_file_info(
         let end_time = chrono::DateTime::from_timestamp(max_time / 1000, 0)
             .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
             .unwrap_or_else(|| "Invalid".to_string());
-        
+
         println!("  Time Range: {} to {}", start_time, end_time);
-        println!("  Duration: {:.2} hours", (max_time - min_time) as f64 / 1000.0 / 3600.0);
+        println!(
+            "  Duration: {:.2} hours",
+            (max_time - min_time) as f64 / 1000.0 / 3600.0
+        );
     }
-    
+
     if dex_breakdown && !dex_stats.is_empty() {
         println!("\nDEX Breakdown:");
         for (dex, count) in &dex_stats {
             println!("  {}: {} pools", dex, count);
         }
     }
-    
+
     if pool_breakdown && !pool_stats.is_empty() {
         println!("\nTop Pools:");
         let mut pools: Vec<_> = pool_stats.iter().collect();
@@ -915,13 +1001,13 @@ fn show_file_info(
             println!("  {}: {} occurrences", pool, count);
         }
     }
-    
+
     // Export to CSV if requested
     if let Some(csv_path) = export_csv {
         export_stats_to_csv(&csv_path, &dex_stats, &pool_stats)?;
         info!("Statistics exported to: {}", csv_path.display());
     }
-    
+
     Ok(())
 }
 
@@ -933,58 +1019,79 @@ fn compare_files(
     ignore_timestamps: bool,
     pool_states_only: bool,
 ) -> Result<()> {
-    info!("Comparing files: {} vs {}", file1.display(), file2.display());
-    
+    info!(
+        "Comparing files: {} vs {}",
+        file1.display(),
+        file2.display()
+    );
+
     let data1 = std::fs::read(&file1)?;
     let data2 = std::fs::read(&file2)?;
-    
+
     let mut buf1 = bytes::BytesMut::from(&data1[..]);
     let mut buf2 = bytes::BytesMut::from(&data2[..]);
-    
+
     let mut batches1 = Vec::new();
     let mut batches2 = Vec::new();
-    
+
     // Read all batches from both files
     while buf1.has_remaining() {
         if let Ok(batch) = RecordedBatch::decode_length_delimited(&mut buf1) {
             batches1.push(batch);
         }
     }
-    
+
     while buf2.has_remaining() {
         if let Ok(batch) = RecordedBatch::decode_length_delimited(&mut buf2) {
             batches2.push(batch);
         }
     }
-    
+
     let mut differences = Vec::new();
-    
+
     // Compare batch counts
     if batches1.len() != batches2.len() {
-        differences.push(format!("Batch count differs: {} vs {}", batches1.len(), batches2.len()));
+        differences.push(format!(
+            "Batch count differs: {} vs {}",
+            batches1.len(),
+            batches2.len()
+        ));
     }
-    
+
     // Compare individual batches
     let min_batches = batches1.len().min(batches2.len());
     for i in 0..min_batches {
         let batch1 = &batches1[i];
         let batch2 = &batches2[i];
-        
+
         if !ignore_timestamps && batch1.timestamp_ms != batch2.timestamp_ms {
-            differences.push(format!("Batch {} timestamp differs: {} vs {}", i, batch1.timestamp_ms, batch2.timestamp_ms));
+            differences.push(format!(
+                "Batch {} timestamp differs: {} vs {}",
+                i, batch1.timestamp_ms, batch2.timestamp_ms
+            ));
         }
-        
+
         if !pool_states_only {
             if batch1.transactions.len() != batch2.transactions.len() {
-                differences.push(format!("Batch {} transaction count differs: {} vs {}", i, batch1.transactions.len(), batch2.transactions.len()));
+                differences.push(format!(
+                    "Batch {} transaction count differs: {} vs {}",
+                    i,
+                    batch1.transactions.len(),
+                    batch2.transactions.len()
+                ));
             }
         }
-        
+
         if batch1.pool_initializations.len() != batch2.pool_initializations.len() {
-            differences.push(format!("Batch {} pool state count differs: {} vs {}", i, batch1.pool_initializations.len(), batch2.pool_initializations.len()));
+            differences.push(format!(
+                "Batch {} pool state count differs: {} vs {}",
+                i,
+                batch1.pool_initializations.len(),
+                batch2.pool_initializations.len()
+            ));
         }
     }
-    
+
     // Output results
     if differences.is_empty() {
         println!("Files are identical (with specified comparison options)");
@@ -994,7 +1101,7 @@ fn compare_files(
             println!("  {}", diff);
         }
     }
-    
+
     // Write report if requested
     if let Some(output_path) = output {
         let report = serde_json::json!({
@@ -1007,11 +1114,11 @@ fn compare_files(
             "differences": differences,
             "identical": differences.is_empty()
         });
-        
+
         std::fs::write(&output_path, serde_json::to_string_pretty(&report)?)?;
         info!("Diff report written to: {}", output_path.display());
     }
-    
+
     Ok(())
 }
 
@@ -1022,21 +1129,21 @@ fn export_stats_to_csv(
     pool_stats: &std::collections::HashMap<String, usize>,
 ) -> Result<()> {
     use std::io::Write;
-    
+
     let mut file = std::fs::File::create(csv_path)?;
-    
+
     // Write DEX stats
     writeln!(file, "Type,Name,Count")?;
     for (dex, count) in dex_stats {
         writeln!(file, "DEX,{},{}", dex, count)?;
     }
-    
+
     // Write pool stats (top 100)
     let mut pools: Vec<_> = pool_stats.iter().collect();
     pools.sort_by(|a, b| b.1.cmp(a.1));
     for (pool, count) in pools.iter().take(100) {
         writeln!(file, "Pool,{},{}", pool, count)?;
     }
-    
+
     Ok(())
 }

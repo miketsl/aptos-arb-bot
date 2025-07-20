@@ -68,7 +68,9 @@ impl MarketDataIngestorProcessor {
                 endpoint: _,
                 timeout_ms: _,
                 ..
-            } => Box::new(GrpcSource::new(self.config.transaction_stream_config.clone())),
+            } => Box::new(GrpcSource::new(
+                self.config.transaction_stream_config.clone(),
+            )),
             DataSourceConfig::File {
                 path, replay_speed, ..
             } => {
@@ -78,7 +80,10 @@ impl MarketDataIngestorProcessor {
         };
 
         // Start the data source
-        source.start().await.map_err(|e| anyhow::anyhow!("Failed to start data source: {}", e))?;
+        source
+            .start()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to start data source: {}", e))?;
 
         // Create processing steps
         let mut event_extractor =

@@ -8,16 +8,16 @@ use config_lib::load_config_from_path;
 use prost::Message;
 use tokio::runtime::Runtime;
 use tokio::signal;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 use market_data_ingestor::data_source::{RecordedBatch, RecordedPoolState};
 use market_data_ingestor::file_rotation::FileRotationManager;
 use market_data_ingestor::ingestor_config::IndexerProcessorConfig;
 use market_data_ingestor::pool_state_manager::{
-    PoolStateManager, DataSourceType, PoolFilterConfig,
+    DataSourceType, PoolFilterConfig, PoolStateManager,
 };
 use market_data_ingestor::recording_config::RecordingConfig;
-use market_data_ingestor::recording_monitor::{RecordingMonitor, ProgressReporter};
+use market_data_ingestor::recording_monitor::{ProgressReporter, RecordingMonitor};
 
 /// mdi-recorder: capture raw transaction batches with pool state embedding and professional monitoring
 #[derive(Parser)]
@@ -90,7 +90,9 @@ fn main() -> anyhow::Result<()> {
             .expect("Failed to install rustls crypto provider");
 
         // Load configurations
-        let config_path = args.config_path.as_ref()
+        let config_path = args
+            .config_path
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Config path is required for recording"))?;
         let main_config = load_main_config(config_path).await?;
         let recording_config = load_recording_config(&args)?;
@@ -102,7 +104,8 @@ fn main() -> anyhow::Result<()> {
         }
 
         // Validate recording configuration
-        recording_config.validate()
+        recording_config
+            .validate()
             .map_err(|e| anyhow::anyhow!("Invalid recording configuration: {}", e))?;
 
         // Setup file rotation manager
@@ -120,18 +123,24 @@ fn main() -> anyhow::Result<()> {
         );
 
         // Setup pool state manager if enabled
-        let pool_state_manager = if args.no_pool_detection || !recording_config.pool_detection.enabled {
-            info!("Pool state detection disabled");
-            None
-        } else {
-            info!("Pool state detection enabled");
-            let pool_filter_config = create_pool_filter_config(&recording_config);
-            let event_router = setup_event_router(&main_config).await?;
-            Some(PoolStateManager::new(event_router, DataSourceType::Live, pool_filter_config))
-        };
+        let pool_state_manager =
+            if args.no_pool_detection || !recording_config.pool_detection.enabled {
+                info!("Pool state detection disabled");
+                None
+            } else {
+                info!("Pool state detection enabled");
+                let pool_filter_config = create_pool_filter_config(&recording_config);
+                let event_router = setup_event_router(&main_config).await?;
+                Some(PoolStateManager::new(
+                    event_router,
+                    DataSourceType::Live,
+                    pool_filter_config,
+                ))
+            };
 
         // Create transaction stream
-        let mut stream = TransactionStream::new(main_config.transaction_stream_config.clone()).await?;
+        let mut stream =
+            TransactionStream::new(main_config.transaction_stream_config.clone()).await?;
 
         info!("Recording to: {}", args.output);
         info!("Press Ctrl+C to stop recording...");
@@ -173,7 +182,7 @@ fn main() -> anyhow::Result<()> {
 /// Load main configuration
 async fn load_main_config(config_path: &PathBuf) -> anyhow::Result<IndexerProcessorConfig> {
     let cfg = load_config_from_path(config_path.to_str().unwrap()).await?;
-    
+
     let ingestor_config = cfg.ingestor
         .ok_or_else(|| anyhow::anyhow!("Enhanced ingestor configuration is required. Please add 'ingestor' section to your config file."))?;
 
@@ -184,17 +193,24 @@ async fn load_main_config(config_path: &PathBuf) -> anyhow::Result<IndexerProces
 }
 
 /// Setup event router with DEX adapters
-async fn setup_event_router(config: &IndexerProcessorConfig) -> anyhow::Result<Arc<dex_adapters::EventRouter>> {
+async fn setup_event_router(
+    config: &IndexerProcessorConfig,
+) -> anyhow::Result<Arc<dex_adapters::EventRouter>> {
     let mut event_router = dex_adapters::EventRouter::new();
-    
+
     // Register adapters from configuration
     for adapter_config in &config.ingestor_config.adapters {
-        match dex_adapters::create_adapter_from_config(&adapter_config.name, adapter_config.module_address.clone()) {
+        match dex_adapters::create_adapter_from_config(
+            &adapter_config.name,
+            adapter_config.module_address.clone(),
+        ) {
             Ok(adapter) => {
                 let adapter_arc = Arc::from(adapter);
                 event_router.register_adapter(adapter_arc);
-                info!("Registered adapter: {} with module address: {}", 
-                      adapter_config.name, adapter_config.module_address);
+                info!(
+                    "Registered adapter: {} with module address: {}",
+                    adapter_config.name, adapter_config.module_address
+                );
             }
             Err(e) => {
                 warn!("Failed to create adapter {}: {}", adapter_config.name, e);
@@ -202,7 +218,7 @@ async fn setup_event_router(config: &IndexerProcessorConfig) -> anyhow::Result<A
             }
         }
     }
-    
+
     Ok(Arc::new(event_router))
 }
 
@@ -232,7 +248,10 @@ fn load_recording_config(args: &Args) -> anyhow::Result<RecordingConfig> {
 }
 
 /// Setup file rotation manager
-fn setup_file_manager(args: &Args, config: &RecordingConfig) -> anyhow::Result<FileRotationManager> {
+fn setup_file_manager(
+    args: &Args,
+    config: &RecordingConfig,
+) -> anyhow::Result<FileRotationManager> {
     let rotation_settings = if args.no_rotation {
         let mut settings = config.recording.file_rotation.clone();
         settings.enabled = false;
@@ -286,7 +305,9 @@ async fn recording_loop(
     stream: &mut TransactionStream,
     file_manager: &mut FileRotationManager,
     pool_state_manager: &Option<PoolStateManager>,
-    stats_handle: &Arc<tokio::sync::RwLock<market_data_ingestor::recording_monitor::RecordingStats>>,
+    stats_handle: &Arc<
+        tokio::sync::RwLock<market_data_ingestor::recording_monitor::RecordingStats>,
+    >,
     progress_reporter: &mut ProgressReporter,
     monitor: &RecordingMonitor,
     config: &RecordingConfig,
@@ -300,10 +321,13 @@ async fn recording_loop(
 
     loop {
         // Check if we should continue recording
-        if !monitor.should_continue(
-            config.recording.max_batches,
-            config.recording.max_duration_seconds,
-        ).await {
+        if !monitor
+            .should_continue(
+                config.recording.max_batches,
+                config.recording.max_duration_seconds,
+            )
+            .await
+        {
             break;
         }
 
@@ -376,15 +400,18 @@ async fn recording_loop(
 fn generate_sample_config() -> anyhow::Result<()> {
     let sample_config = RecordingConfig::default();
     let yaml_content = serde_yaml::to_string(&sample_config)?;
-    
+
     let config_path = "recording_config_sample.yml";
     std::fs::write(config_path, yaml_content)?;
-    
+
     println!("Generated sample recording configuration: {}", config_path);
     println!("\nTo use this configuration:");
     println!("1. Edit the file to customize settings");
-    println!("2. Run: mdi-recorder --config-path main.yml --recording-config {}", config_path);
-    
+    println!(
+        "2. Run: mdi-recorder --config-path main.yml --recording-config {}",
+        config_path
+    );
+
     Ok(())
 }
 
@@ -394,40 +421,49 @@ async fn process_batch_for_pool_discovery(
     batch: &aptos_indexer_processor_sdk::aptos_indexer_transaction_stream::TransactionsPBResponse,
 ) -> anyhow::Result<Vec<RecordedPoolState>> {
     let mut all_discoveries = Vec::new();
-    
+
     // Extract pool discoveries from each transaction in the batch
     for transaction in &batch.transactions {
-        match pool_manager.extract_pool_ids_from_transaction(transaction).await {
+        match pool_manager
+            .extract_pool_ids_from_transaction(transaction)
+            .await
+        {
             Ok(discoveries) => {
                 all_discoveries.extend(discoveries);
             }
             Err(e) => {
-                warn!("Failed to extract pool IDs from transaction {}: {}", transaction.version, e);
+                warn!(
+                    "Failed to extract pool IDs from transaction {}: {}",
+                    transaction.version, e
+                );
             }
         }
     }
-    
+
     if all_discoveries.is_empty() {
         return Ok(Vec::new());
     }
-    
-    info!("Found {} potential pool discoveries in batch", all_discoveries.len());
-    
+
+    info!(
+        "Found {} potential pool discoveries in batch",
+        all_discoveries.len()
+    );
+
     // Process discoveries to determine which pools to track
     let pools_to_fetch = pool_manager.process_pool_discoveries(all_discoveries).await;
-    
+
     if pools_to_fetch.is_empty() {
         return Ok(Vec::new());
     }
-    
+
     info!("Will fetch state for {} new pools", pools_to_fetch.len());
-    
+
     // Spawn async workers to fetch pool states
     pool_manager.spawn_pool_state_workers(pools_to_fetch).await;
-    
+
     // Get any completed pool states from cache
     let cached_states = pool_manager.drain_cached_pool_states().await;
-    
+
     // Convert PoolState to RecordedPoolState
     let mut recorded_states = Vec::new();
     for (pool_id, pool_state) in cached_states {
@@ -435,43 +471,65 @@ async fn process_batch_for_pool_discovery(
         recorded_states.push(recorded_state);
         info!("Converted pool state for {} to recorded format", pool_id);
     }
-    
+
     Ok(recorded_states)
 }
 
 /// Convert PoolState to RecordedPoolState for embedding in recordings
-fn convert_pool_state_to_recorded(pool_state: dex_adapters::PoolState, block_height: u64) -> RecordedPoolState {
+fn convert_pool_state_to_recorded(
+    pool_state: dex_adapters::PoolState,
+    block_height: u64,
+) -> RecordedPoolState {
     // Extract additional token data if available
-    let (all_tokens, all_reserves, all_weights) = if let Some(tokens) = pool_state.additional_data.get("all_tokens") {
-        let tokens_vec = tokens.as_array()
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
-            .unwrap_or_default();
-        
-        let reserves_vec = pool_state.additional_data.get("all_reserves")
-            .and_then(|r| r.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
-            .unwrap_or_default();
-        
-        let weights_vec = pool_state.additional_data.get("all_weights")
-            .and_then(|w| w.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|n| n as u32)).collect())
-            .unwrap_or_default();
-        
-        (tokens_vec, reserves_vec, weights_vec)
-    } else {
-        (Vec::new(), Vec::new(), Vec::new())
-    };
-    
+    let (all_tokens, all_reserves, all_weights) =
+        if let Some(tokens) = pool_state.additional_data.get("all_tokens") {
+            let tokens_vec = tokens
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let reserves_vec = pool_state
+                .additional_data
+                .get("all_reserves")
+                .and_then(|r| r.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let weights_vec = pool_state
+                .additional_data
+                .get("all_weights")
+                .and_then(|w| w.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_u64().map(|n| n as u32))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            (tokens_vec, reserves_vec, weights_vec)
+        } else {
+            (Vec::new(), Vec::new(), Vec::new())
+        };
+
     // Extract pool type
-    let pool_type = pool_state.additional_data.get("pool_type")
+    let pool_type = pool_state
+        .additional_data
+        .get("pool_type")
         .and_then(|pt| pt.as_str())
         .unwrap_or("constant_product")
         .to_string();
-    
+
     // Serialize additional data
-    let additional_data = serde_json::to_vec(&pool_state.additional_data)
-        .unwrap_or_default();
-    
+    let additional_data = serde_json::to_vec(&pool_state.additional_data).unwrap_or_default();
+
     RecordedPoolState {
         pool_id: pool_state.pool_id,
         dex_name: pool_state.dex_name,

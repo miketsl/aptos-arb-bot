@@ -1,16 +1,16 @@
 // Re-export everything from the modular structure
-pub mod grpc;
 pub mod file;
+pub mod grpc;
 
 // Re-export core types and traits
-use async_trait::async_trait;
 use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::Transaction as ProtoTransaction;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 use thiserror::Error;
 
-pub use grpc::{GrpcSource, ReconnectionConfig, ConnectionStats, ConnectionState};
 pub use file::FileSource;
+pub use grpc::{ConnectionState, ConnectionStats, GrpcSource, ReconnectionConfig};
 
 /// Error types for data source operations
 #[derive(Error, Debug)]
@@ -71,16 +71,16 @@ pub struct EventMetadata {
 pub trait DataSource: Send {
     /// Start the data source and begin producing events
     async fn start(&mut self) -> Result<(), DataSourceError>;
-    
+
     /// Get the next event from the data source
     async fn next_event(&mut self) -> Result<Option<TimestampedEvent>, DataSourceError>;
-    
+
     /// Stop the data source and clean up resources
     async fn stop(&mut self) -> Result<(), DataSourceError>;
-    
+
     /// Check if the data source is currently active
     fn is_active(&self) -> bool;
-    
+
     /// Get the name/type of this data source for logging
     fn source_type(&self) -> &'static str;
 }
@@ -111,7 +111,7 @@ pub struct RecordedPoolState {
     pub pool_id: String,
     #[prost(string, tag = "2")]
     pub dex_name: String,
-    
+
     // Fast path: Primary pair (covers 90% of pools)
     #[prost(string, tag = "3")]
     pub token_a: String,
@@ -122,8 +122,8 @@ pub struct RecordedPoolState {
     #[prost(string, tag = "6")]
     pub reserve_b: String, // Decimal as string for precision
     #[prost(string, tag = "7")]
-    pub fee_rate: String,  // Decimal as string for precision
-    
+    pub fee_rate: String, // Decimal as string for precision
+
     // Complete data: For complex pools (optional for performance)
     #[prost(string, repeated, tag = "10")]
     pub all_tokens: Vec<String>, // Empty for 2-token pools, complete list for multi-token
@@ -131,7 +131,7 @@ pub struct RecordedPoolState {
     pub all_reserves: Vec<String>, // Empty for 2-token pools, complete list for multi-token
     #[prost(uint32, repeated, tag = "12")]
     pub all_weights: Vec<u32>, // Empty for non-weighted pools, weights for weighted pools
-    
+
     // Metadata
     #[prost(string, tag = "13")]
     pub pool_type: String, // "clmm", "weighted", "stable", "constant_product"
