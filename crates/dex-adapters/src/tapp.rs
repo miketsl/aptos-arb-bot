@@ -197,8 +197,8 @@ impl DexAdapter for TappAdapter {
             block_height: pool_data.last_updated_block,
             additional_data: serde_json::json!({
                 "pool_type": pool_data.pool_type,
-                "tokens": pool_data.tokens,
-                "reserves": pool_data.reserves,
+                "all_tokens": pool_data.tokens,
+                "all_reserves": pool_data.reserves,
                 "sqrt_price": pool_data.sqrt_price,
                 "liquidity": pool_data.liquidity,
                 "tick": pool_data.tick,

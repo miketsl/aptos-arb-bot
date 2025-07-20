@@ -103,6 +103,7 @@ pub struct RecordedBatch {
 }
 
 /// Recorded pool state for historical replay consistency
+/// Hybrid design: fast path for 2-token pools, complete data for multi-token pools
 #[derive(prost::Message, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordedPoolState {
@@ -110,6 +111,8 @@ pub struct RecordedPoolState {
     pub pool_id: String,
     #[prost(string, tag = "2")]
     pub dex_name: String,
+    
+    // Fast path: Primary pair (covers 90% of pools)
     #[prost(string, tag = "3")]
     pub token_a: String,
     #[prost(string, tag = "4")]
@@ -120,6 +123,18 @@ pub struct RecordedPoolState {
     pub reserve_b: String, // Decimal as string for precision
     #[prost(string, tag = "7")]
     pub fee_rate: String,  // Decimal as string for precision
+    
+    // Complete data: For complex pools (optional for performance)
+    #[prost(string, repeated, tag = "10")]
+    pub all_tokens: Vec<String>, // Empty for 2-token pools, complete list for multi-token
+    #[prost(string, repeated, tag = "11")]
+    pub all_reserves: Vec<String>, // Empty for 2-token pools, complete list for multi-token
+    #[prost(uint32, repeated, tag = "12")]
+    pub all_weights: Vec<u32>, // Empty for non-weighted pools, weights for weighted pools
+    
+    // Metadata
+    #[prost(string, tag = "13")]
+    pub pool_type: String, // "clmm", "weighted", "stable", "constant_product"
     #[prost(uint64, tag = "8")]
     pub block_height: u64,
     #[prost(bytes, tag = "9")]

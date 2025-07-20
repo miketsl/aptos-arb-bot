@@ -47,5 +47,9 @@ rustls = "0.23.28"
 prost = "0.13"
 bytes = "1.4"
 
+# Cryptographic hashing for file integrity
+sha2 = "0.10"
+
 [dev-dependencies]
 mockall = "0.12"
+tempfile = "3.8"

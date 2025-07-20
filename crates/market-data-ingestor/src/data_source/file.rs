@@ -226,6 +226,10 @@ mod tests {
             reserve_a: "1000000".to_string(),
             reserve_b: "500000".to_string(),
             fee_rate: "0.003".to_string(),
+            all_tokens: vec![], // Empty for 2-token pool (fast path)
+            all_reserves: vec![], // Empty for 2-token pool (fast path)
+            all_weights: vec![], // Empty for non-weighted pool
+            pool_type: "clmm".to_string(),
             block_height: 12345,
             additional_data: b"{\"tick_spacing\": 100}".to_vec(),
         };

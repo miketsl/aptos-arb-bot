@@ -107,6 +107,7 @@ impl DexAdapter for HyperionAdapter {
             fee_rate: (pool_data.fee_bps as f64 / 10000.0).to_string(),
             block_height: pool_data.last_updated_block,
             additional_data: serde_json::json!({
+                "pool_type": "clmm",
                 "sqrt_price": pool_data.sqrt_price,
                 "liquidity": pool_data.liquidity,
                 "tick": pool_data.tick,
