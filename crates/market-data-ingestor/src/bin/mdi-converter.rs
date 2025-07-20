@@ -187,19 +187,10 @@ enum Commands {
 }
 
 /// Conversion options for filtering output
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ConversionOptions {
     pub exclude_transactions: bool,
     pub pool_states_only: bool,
-}
-
-impl Default for ConversionOptions {
-    fn default() -> Self {
-        Self {
-            exclude_transactions: false,
-            pool_states_only: false,
-        }
-    }
 }
 
 /// Conversion statistics
@@ -446,13 +437,14 @@ fn main() -> Result<()> {
 }
 
 /// Convert single protobuf file to JSON
+#[allow(clippy::too_many_arguments)]
 fn convert_to_json_single(
     input: PathBuf,
     output: PathBuf,
     pretty: bool,
     include_metadata: bool,
     filter: ConversionFilter,
-    options: ConversionOptions,
+    _options: ConversionOptions,
     compress: bool,
     generate_stats: bool,
 ) -> Result<()> {
@@ -490,12 +482,10 @@ fn convert_to_json_single(
     // Create JSON output
     let json_data = if include_metadata {
         create_json_with_metadata(&batches, &stats)?
+    } else if pretty {
+        to_string_pretty(&batches)?
     } else {
-        if pretty {
-            to_string_pretty(&batches)?
-        } else {
-            serde_json::to_string(&batches)?
-        }
+        serde_json::to_string(&batches)?
     };
 
     // Write output
@@ -510,6 +500,7 @@ fn convert_to_json_single(
 }
 
 /// Convert batch of protobuf files to JSON
+#[allow(clippy::too_many_arguments)]
 fn convert_to_json_batch(
     input_dir: PathBuf,
     output_dir: PathBuf,
@@ -571,9 +562,9 @@ fn convert_to_protobuf_single(
     input: PathBuf,
     output: PathBuf,
     validate: bool,
-    strict: bool,
+    _strict: bool,
     repair: bool,
-    backup_original: bool,
+    _backup_original: bool,
     generate_stats: bool,
 ) -> Result<()> {
     info!(
@@ -589,7 +580,7 @@ fn convert_to_protobuf_single(
     let batches: Vec<RecordedBatch> = if repair {
         repair_and_parse_json(&content, &mut stats)?
     } else {
-        from_str(&content).context("Failed to parse JSON")?
+        parse_json_batches(&content).context("Failed to parse JSON")?
     };
 
     stats.batches_processed = batches.len();
@@ -682,9 +673,9 @@ fn convert_to_protobuf_batch(
 fn validate_single(
     protobuf: PathBuf,
     json: PathBuf,
-    cycles: u32,
+    _cycles: u32,
     detailed: bool,
-    report: Option<PathBuf>,
+    _report: Option<PathBuf>,
     _temp_dir: Option<PathBuf>,
     _parallel: usize,
 ) -> Result<()> {
@@ -706,7 +697,7 @@ fn validate_single(
         pb_batches.push(batch);
     }
 
-    let json_batches: Vec<RecordedBatch> = from_str(&json_content)?;
+    let json_batches: Vec<RecordedBatch> = parse_json_batches(&json_content)?;
 
     // Compare
     if pb_batches.len() != json_batches.len() {
@@ -725,6 +716,8 @@ fn validate_single(
         }
     }
 
+    println!("Round-trip validation successful");
+    println!("Data integrity: PASSED");
     info!("Validation completed successfully");
     Ok(())
 }
@@ -733,9 +726,9 @@ fn validate_single(
 fn validate_batch(
     protobuf_dir: PathBuf,
     json_dir: PathBuf,
-    cycles: u32,
+    _cycles: u32,
     detailed: bool,
-    report: Option<PathBuf>,
+    _report: Option<PathBuf>,
     _temp_dir: Option<PathBuf>,
     _parallel: usize,
 ) -> Result<()> {
@@ -757,7 +750,8 @@ fn validate_batch(
                 json_dir.join(pb_path.file_stem().unwrap().to_str().unwrap().to_string() + ".json");
 
             if json_path.exists() {
-                match validate_single(pb_path.clone(), json_path, cycles, detailed, None, None, 1) {
+                match validate_single(pb_path.clone(), json_path, _cycles, detailed, None, None, 1)
+                {
                     Ok(_) => {
                         info!("Validated: {}", pb_path.display());
                         validated += 1;
@@ -781,6 +775,7 @@ fn validate_batch(
 }
 
 /// Process batch operation with parallel workers
+#[allow(clippy::too_many_arguments)]
 fn process_batch_operation(
     input_dir: PathBuf,
     output_dir: PathBuf,
@@ -824,7 +819,6 @@ fn process_batch_operation(
 }
 
 /// Helper functions
-
 fn create_json_with_metadata(batches: &[RecordedBatch], stats: &ConversionStats) -> Result<String> {
     let output = serde_json::json!({
         "metadata": {
@@ -853,10 +847,33 @@ fn write_output(path: &PathBuf, data: &[u8], compress: bool) -> Result<()> {
     Ok(())
 }
 
+/// Parse JSON content that may be in different formats:
+/// 1. Direct array: [batch1, batch2, ...]
+/// 2. With metadata: {"metadata": {...}, "batches": [batch1, batch2, ...]}
+fn parse_json_batches(content: &str) -> Result<Vec<RecordedBatch>> {
+    // First try to parse as a direct array
+    if let Ok(batches) = from_str::<Vec<RecordedBatch>>(content) {
+        return Ok(batches);
+    }
+
+    // If that fails, try to parse as an object with metadata
+    let json_value: serde_json::Value =
+        from_str(content).context("Failed to parse JSON as any valid format")?;
+
+    if let Some(batches_value) = json_value.get("batches") {
+        let batches: Vec<RecordedBatch> = serde_json::from_value(batches_value.clone())
+            .context("Failed to parse 'batches' field from JSON")?;
+        return Ok(batches);
+    }
+
+    Err(anyhow::anyhow!(
+        "JSON format not recognized. Expected either a direct array of batches or an object with 'batches' field"
+    ))
+}
+
 fn repair_and_parse_json(content: &str, stats: &mut ConversionStats) -> Result<Vec<RecordedBatch>> {
-    // Implement JSON repair logic here
-    // For now, just try normal parsing
-    match from_str(content) {
+    // Try smart parsing first
+    match parse_json_batches(content) {
         Ok(batches) => Ok(batches),
         Err(e) => {
             stats.errors += 1;
@@ -920,7 +937,7 @@ fn validate_batch_detailed(
 /// Display detailed file information and statistics
 fn show_file_info(
     input: PathBuf,
-    detailed: bool,
+    _detailed: bool,
     export_csv: Option<PathBuf>,
     pool_breakdown: bool,
     dex_breakdown: bool,
@@ -1071,15 +1088,13 @@ fn compare_files(
             ));
         }
 
-        if !pool_states_only {
-            if batch1.transactions.len() != batch2.transactions.len() {
-                differences.push(format!(
-                    "Batch {} transaction count differs: {} vs {}",
-                    i,
-                    batch1.transactions.len(),
-                    batch2.transactions.len()
-                ));
-            }
+        if !pool_states_only && batch1.transactions.len() != batch2.transactions.len() {
+            differences.push(format!(
+                "Batch {} transaction count differs: {} vs {}",
+                i,
+                batch1.transactions.len(),
+                batch2.transactions.len()
+            ));
         }
 
         if batch1.pool_initializations.len() != batch2.pool_initializations.len() {

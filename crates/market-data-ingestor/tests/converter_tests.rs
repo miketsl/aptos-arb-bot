@@ -1,5 +1,4 @@
 use prost::Message;
-use serde_json;
 use std::fs;
 use tempfile::NamedTempFile;
 
@@ -64,7 +63,7 @@ fn test_protobuf_to_json_conversion() {
 
     // Run conversion using the mdi-converter binary
     let output = std::process::Command::new("cargo")
-        .args(&["run", "--bin", "mdi-converter", "--", "to-json"])
+        .args(["run", "--bin", "mdi-converter", "--", "to-json"])
         .arg("--input")
         .arg(temp_pb_file.path())
         .arg("--output")
@@ -97,11 +96,11 @@ fn test_protobuf_to_json_conversion() {
     assert_eq!(batches.len(), 1, "Should have exactly one batch");
 
     let batch = &batches[0];
-    assert_eq!(batch["start_version"], 12345);
-    assert_eq!(batch["end_version"], 12346);
-    assert_eq!(batch["timestamp_ms"], 1640995200000i64);
+    assert_eq!(batch["startVersion"], 12345);
+    assert_eq!(batch["endVersion"], 12346);
+    assert_eq!(batch["timestampMs"], 1640995200000i64);
 
-    let pool_inits = batch["pool_initializations"]
+    let pool_inits = batch["poolInitializations"]
         .as_array()
         .expect("Pool initializations should be array");
     assert_eq!(
@@ -111,11 +110,11 @@ fn test_protobuf_to_json_conversion() {
     );
 
     let pool = &pool_inits[0];
-    assert_eq!(pool["pool_id"], "test_pool_123");
-    assert_eq!(pool["dex_name"], "hyperion");
-    assert_eq!(pool["token_a"], "APT");
-    assert_eq!(pool["token_b"], "USDC");
-    assert_eq!(pool["pool_type"], "clmm");
+    assert_eq!(pool["poolId"], "test_pool_123");
+    assert_eq!(pool["dexName"], "hyperion");
+    assert_eq!(pool["tokenA"], "APT");
+    assert_eq!(pool["tokenB"], "USDC");
+    assert_eq!(pool["poolType"], "clmm");
 }
 
 #[test]
@@ -129,7 +128,7 @@ fn test_json_to_protobuf_conversion() {
 
     // First convert to JSON
     let output = std::process::Command::new("cargo")
-        .args(&["run", "--bin", "mdi-converter", "--", "to-json"])
+        .args(["run", "--bin", "mdi-converter", "--", "to-json"])
         .arg("--input")
         .arg(temp_pb_file.path())
         .arg("--output")
@@ -141,7 +140,7 @@ fn test_json_to_protobuf_conversion() {
 
     // Then convert back to protobuf
     let output = std::process::Command::new("cargo")
-        .args(&["run", "--bin", "mdi-converter", "--", "to-protobuf"])
+        .args(["run", "--bin", "mdi-converter", "--", "to-protobuf"])
         .arg("--input")
         .arg(temp_json_file.path())
         .arg("--output")
@@ -192,7 +191,7 @@ fn test_round_trip_validation() {
 
     // Convert to JSON
     let output = std::process::Command::new("cargo")
-        .args(&["run", "--bin", "mdi-converter", "--", "to-json"])
+        .args(["run", "--bin", "mdi-converter", "--", "to-json"])
         .arg("--input")
         .arg(temp_pb_file.path())
         .arg("--output")
@@ -204,7 +203,7 @@ fn test_round_trip_validation() {
 
     // Run round-trip validation
     let output = std::process::Command::new("cargo")
-        .args(&["run", "--bin", "mdi-converter", "--", "validate"])
+        .args(["run", "--bin", "mdi-converter", "--", "validate"])
         .arg("--protobuf")
         .arg(temp_pb_file.path())
         .arg("--json")
@@ -276,7 +275,7 @@ fn test_multi_token_pool_conversion() {
 
     // Convert to JSON
     let output = std::process::Command::new("cargo")
-        .args(&["run", "--bin", "mdi-converter", "--", "to-json"])
+        .args(["run", "--bin", "mdi-converter", "--", "to-json"])
         .arg("--input")
         .arg(temp_pb_file.path())
         .arg("--output")
@@ -293,28 +292,28 @@ fn test_multi_token_pool_conversion() {
     let json_value: serde_json::Value =
         serde_json::from_str(&json_content).expect("Invalid JSON output");
 
-    let pool = &json_value["batches"][0]["pool_initializations"][0];
+    let pool = &json_value["batches"][0]["poolInitializations"][0];
 
     // Verify multi-token fields
-    let all_tokens = pool["all_tokens"]
+    let all_tokens = pool["allTokens"]
         .as_array()
-        .expect("all_tokens should be array");
+        .expect("allTokens should be array");
     assert_eq!(all_tokens.len(), 4, "Should have 4 tokens");
     assert_eq!(all_tokens[0], "APT");
     assert_eq!(all_tokens[3], "BTC");
 
-    let all_reserves = pool["all_reserves"]
+    let all_reserves = pool["allReserves"]
         .as_array()
-        .expect("all_reserves should be array");
+        .expect("allReserves should be array");
     assert_eq!(all_reserves.len(), 4, "Should have 4 reserves");
 
-    let all_weights = pool["all_weights"]
+    let all_weights = pool["allWeights"]
         .as_array()
-        .expect("all_weights should be array");
+        .expect("allWeights should be array");
     assert_eq!(all_weights.len(), 4, "Should have 4 weights");
     assert_eq!(all_weights[0], 25);
 
-    assert_eq!(pool["pool_type"], "weighted");
+    assert_eq!(pool["poolType"], "weighted");
 }
 
 #[test]
@@ -333,7 +332,7 @@ fn test_empty_batch_conversion() {
 
     // Convert to JSON
     let output = std::process::Command::new("cargo")
-        .args(&["run", "--bin", "mdi-converter", "--", "to-json"])
+        .args(["run", "--bin", "mdi-converter", "--", "to-json"])
         .arg("--input")
         .arg(temp_pb_file.path())
         .arg("--output")
@@ -351,13 +350,14 @@ fn test_empty_batch_conversion() {
         serde_json::from_str(&json_content).expect("Invalid JSON output");
 
     let batch = &json_value["batches"][0];
-    assert_eq!(batch["start_version"], 99999);
+    assert_eq!(batch["startVersion"], 99999);
     assert_eq!(batch["transactions"].as_array().unwrap().len(), 0);
-    assert_eq!(batch["pool_initializations"].as_array().unwrap().len(), 0);
+    assert_eq!(batch["poolInitializations"].as_array().unwrap().len(), 0);
 
     // Verify metadata
     let metadata = &json_value["metadata"];
-    assert_eq!(metadata["batch_count"], 1);
-    assert_eq!(metadata["total_transactions"], 0);
-    assert_eq!(metadata["total_pools_discovered"], 0);
+    let statistics = &metadata["statistics"];
+    assert_eq!(statistics["batches_count"], 1);
+    assert_eq!(statistics["transactions_count"], 0);
+    assert_eq!(statistics["pool_states_count"], 0);
 }

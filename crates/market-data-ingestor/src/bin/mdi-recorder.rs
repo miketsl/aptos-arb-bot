@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -180,7 +180,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Load main configuration
-async fn load_main_config(config_path: &PathBuf) -> anyhow::Result<IndexerProcessorConfig> {
+async fn load_main_config(config_path: &Path) -> anyhow::Result<IndexerProcessorConfig> {
     let cfg = load_config_from_path(config_path.to_str().unwrap()).await?;
 
     let ingestor_config = cfg.ingestor
