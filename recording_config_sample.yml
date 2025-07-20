@@ -1,0 +1,28 @@
+recording:
+  output_file: recording_{timestamp}.pb
+  file_rotation:
+    enabled: true
+    max_size_mb: 1000
+    max_files: 10
+    compress_rotated: false
+  max_batches: 0
+  max_duration_seconds: 0
+pool_detection:
+  enabled: true
+  filters:
+    min_tvl_usd: null
+    max_tracked_pools: 5000
+    dex_whitelist: null
+    token_blacklist: null
+    pool_type_whitelist: null
+  workers:
+    pool_size: 20
+    timeout_seconds: 30
+    retry_attempts: 3
+    rate_limit_per_minute: 100
+monitoring:
+  stats_interval_seconds: 10
+  progress_report_interval: 100
+  health_check_interval_seconds: 60
+  verbose_logging: false
+  log_file: null

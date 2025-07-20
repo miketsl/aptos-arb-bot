@@ -1,9 +1,12 @@
+pub mod data_source;
+pub mod file_rotation;
 pub mod ingestor_config;
+pub mod pool_state_manager;
 pub mod processor;
+pub mod recording_config;
+pub mod recording_monitor;
 pub mod steps;
 pub mod types;
-pub mod data_source;
-pub mod pool_state_manager;
 
 pub use ingestor_config::IndexerProcessorConfig;
 pub use processor::MarketDataIngestorProcessor;

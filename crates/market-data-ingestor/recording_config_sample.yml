@@ -1,0 +1,86 @@
+# Enhanced MDI Recorder Configuration
+# This file configures the enhanced mdi-recorder tool with professional features
+
+recording:
+  # Output file pattern with timestamp support
+  output_file: "recording_{timestamp}.pb"
+  
+  # File rotation settings
+  file_rotation:
+    enabled: true
+    max_size_mb: 1000        # Rotate when file reaches 1GB
+    max_files: 10            # Keep maximum 10 files
+    compress_rotated: false  # Set to true to gzip old files
+  
+  # Recording limits (0 = unlimited)
+  max_batches: 0
+  max_duration_seconds: 0
+
+# Pool detection and state embedding configuration
+pool_detection:
+  enabled: true
+  
+  # Pool filtering to control which pools are tracked
+  filters:
+    # Minimum TVL threshold (disabled until price feeds available)
+    min_tvl_usd: null
+    
+    # Maximum number of pools to track simultaneously
+    max_tracked_pools: 5000
+    
+    # DEX whitelist - only track pools from these DEXes
+    # Leave null to track all configured DEXes
+    dex_whitelist: 
+      - "hyperion"
+      - "thala"
+      # - "tapp"
+    
+    # Token blacklist - never track pools containing these tokens
+    token_blacklist:
+      - "SCAM_TOKEN"
+      - "FAKE_COIN"
+    
+    # Pool type whitelist - only track these pool types
+    # Leave null to track all pool types
+    pool_type_whitelist: null
+      # - "clmm"
+      # - "constant_product"
+  
+  # Worker configuration for concurrent pool state fetching
+  workers:
+    pool_size: 20              # Number of concurrent workers
+    timeout_seconds: 30        # Timeout for individual operations
+    retry_attempts: 3          # Number of retry attempts
+    rate_limit_per_minute: 100 # API rate limiting
+
+# Monitoring and reporting configuration
+monitoring:
+  # Statistics reporting interval (seconds)
+  stats_interval_seconds: 10
+  
+  # Progress report interval (number of batches)
+  progress_report_interval: 100
+  
+  # Health check interval (seconds)
+  health_check_interval_seconds: 60
+  
+  # Enable verbose logging
+  verbose_logging: false
+  
+  # Optional log file path
+  log_file: null
+    # log_file: "recording.log"
+
+# Example usage:
+# 
+# Basic recording:
+#   mdi-recorder --config-path config/default.yml --recording-config recording_config.yml
+#
+# With CLI overrides:
+#   mdi-recorder --config-path config/default.yml --recording-config recording_config.yml --max-batches 1000 --verbose
+#
+# Generate this config file:
+#   mdi-recorder --generate-config
+#
+# Disable specific features:
+#   mdi-recorder --config-path config/default.yml --no-pool-detection --no-rotation
