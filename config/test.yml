@@ -1,32 +1,22 @@
-# Enhanced configuration structure
+# Test configuration for file-based replay
 transaction_stream_config:
   starting_version: null
   indexer_grpc_data_service_address: "https://grpc.mainnet.aptoslabs.com:443"
-  auth_token: "aptoslabs_Br2xqQ1m9MV_3aTvPFA7e94a3acFpprPHHXePH98LURdf"
+  auth_token: "test_token"
   request_name_header: "market-data-ingestor"
 
 # Enhanced ingestor configuration for production monitoring
 ingestor:
-  # Data source configuration
+  # Data source configuration - using file to avoid gRPC issues
   data_source:
-    type: "grpc"
-    endpoint: "https://grpc.mainnet.aptoslabs.com:443"
-    timeout_ms: 30000
-    max_reconnect_attempts: 5
-    backoff_base_ms: 1000
-    # For file-based replay (RecordedBatch protobuf), use this instead:
-    # type: "file"
-    # path: "./recordings/mainnet_2024_01.pb"
-    # replay_speed: 1.0  # 1.0 = real-time, 0 = as fast as possible
+    type: "file"
+    path: "./recordings/mainnet_sample.pb"  # Use protobuf file
+    replay_speed: 0  # As fast as possible
   
   # Filter configuration
   filters:
     enabled: true
     token_whitelist: ["APT", "USDC", "USDT"]
-    token_pairs: 
-      - ["APT", "USDC"]
-      - ["APT", "USDT"]
-    min_liquidity: "1000"
   
   # Performance and monitoring configuration
   performance:
@@ -45,23 +35,6 @@ ingestor:
       events:
         swap: "::pool::SwapAfterEvent"
         snapshot: "::pool::PoolSnapshot"
-      settings:
-        tick_spacing_threshold: 10
-    
-    - name: "ThalaSwap"
-      module_address: "0x48271d39d0b05bd6efca2278f22277d6fcc375504f9839fd73f74ace240861af"
-      enabled: true
-      events:
-        swap: "::pool::SwapAfterEvent"
-        snapshot: "::pool::PoolSnapshot"
-      settings: {}
-
-    - name: "Tapp"
-      module_address: "0xtapp_module_address"
-      enabled: false
-      events:
-        swap: "::events::Swap"
-        snapshot: "::events::PoolSnapshot"
       settings: {}
 
   # Pool state management configuration
@@ -75,20 +48,17 @@ ingestor:
 # Legacy market data config (kept for backward compatibility)
 market_data_config:
   data_source:
-    type: "grpc"
+    type: "file"
+    path: "./recordings/mainnet_sample.pb"
+    replay_speed: 1.0
   filters:
-    mode: "token_pairs"
-    token_pairs:
-      - ["APT", "USDC"]
-      - ["APT", "USDT"]
+    mode: "all"
   dexs: 
     - name: "Hyperion"
       module_address: "0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039"
       events:
         swap: "::pool::SwapAfterEvent"
-        snapshot: "::pool::PoolSnapshot"
-      settings:
-        tick_spacing_threshold: 10
+      settings: {}
 
 detector_config:
   strategies: []

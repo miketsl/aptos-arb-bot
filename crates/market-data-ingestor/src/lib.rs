@@ -1,6 +1,8 @@
 pub mod data_source;
 pub mod file_rotation;
+pub mod http_server;
 pub mod ingestor_config;
+pub mod monitoring;
 pub mod pool_state_manager;
 pub mod processor;
 pub mod recording_config;
@@ -33,3 +35,10 @@ pub use pool_state_manager::{
     PoolStateStats, PoolStatus, RegistrySizes, WorkerResult,
 };
 pub use recording_config::MonitoringSettings;
+
+// Export production monitoring
+pub use monitoring::{
+    format_duration, timestamp_to_rfc3339, ConnectionQuality, ConnectionStatusMetrics,
+    DataFlowMetrics, ErrorTrackingMetrics, MetricsCollector, PoolDiscoveryMetrics,
+    ProductionMetrics, PrometheusMetrics, SystemHealthMetrics,
+};

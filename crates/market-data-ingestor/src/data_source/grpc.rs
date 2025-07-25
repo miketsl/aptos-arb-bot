@@ -300,6 +300,18 @@ impl DataSource for GrpcSource {
                                 tracing::error!(error = %e, "Failed to get next batch from gRPC stream");
                                 self.inner = None;
                                 self.connection_state = ConnectionState::Failed;
+                                self.consecutive_failures += 1;
+
+                                // Surface error to metrics system every few failures or if we've exceeded max failures
+                                if self.consecutive_failures % 3 == 0
+                                    || self.consecutive_failures
+                                        >= self.reconnection_config.max_failures
+                                {
+                                    return Err(DataSourceError::ConnectionFailed(format!(
+                                        "gRPC stream error after {} consecutive failures: {}",
+                                        self.consecutive_failures, e
+                                    )));
+                                }
                                 // Continue to reconnection logic below
                             }
                         }

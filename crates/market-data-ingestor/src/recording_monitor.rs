@@ -13,6 +13,8 @@ pub struct RecordingStats {
     // Recording metrics
     pub batches_recorded: u64,
     pub transactions_recorded: u64,
+    pub blocks_processed: u64,
+    pub last_block_number: Option<u64>,
     pub bytes_written: u64,
     pub files_created: u32,
 
