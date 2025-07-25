@@ -82,6 +82,13 @@ impl EventRouter {
         &self.all_adapters
     }
 
+    /// Check if a DEX is supported by any registered adapter
+    pub fn is_dex_supported(&self, dex_name: &str) -> bool {
+        self.all_adapters
+            .iter()
+            .any(|adapter| adapter.id() == dex_name)
+    }
+
     /// Get adapter by DEX name
     pub fn get_adapter(&self, dex_name: &str) -> Option<Arc<dyn DexAdapter>> {
         self.all_adapters

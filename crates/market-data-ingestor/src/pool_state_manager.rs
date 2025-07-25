@@ -338,6 +338,7 @@ impl PoolStateManager {
         discoveries: Vec<PoolDiscovery>,
     ) -> Vec<PoolDiscovery> {
         let mut pools_to_fetch = Vec::new();
+        let mut pools_added_in_batch = 0;
 
         for discovery in discoveries {
             // Check if pool is already in any registry
@@ -349,9 +350,13 @@ impl PoolStateManager {
                     continue;
                 }
                 PoolStatus::Unknown => {
-                    // Apply filtering logic
-                    if self.should_track_pool(&discovery).await {
+                    // Apply filtering logic with current batch count
+                    if self
+                        .should_track_pool_with_batch_count(&discovery, pools_added_in_batch)
+                        .await
+                    {
                         pools_to_fetch.push(discovery);
+                        pools_added_in_batch += 1;
                     } else {
                         // Add to rejected pools
                         let pool_id = discovery.pool_id.clone();
@@ -371,7 +376,37 @@ impl PoolStateManager {
     }
 
     /// Apply filtering logic to determine if a pool should be tracked
+    #[allow(dead_code)]
     async fn should_track_pool(&self, discovery: &PoolDiscovery) -> bool {
+        self.should_track_pool_with_batch_count(discovery, 0).await
+    }
+
+    /// Apply filtering logic with batch count to determine if a pool should be tracked
+    async fn should_track_pool_with_batch_count(
+        &self,
+        discovery: &PoolDiscovery,
+        pools_added_in_batch: usize,
+    ) -> bool {
+        // Basic validation - reject empty/invalid IDs
+        if discovery.pool_id.is_empty() || discovery.dex_name.is_empty() {
+            tracing::debug!(
+                pool_id = %discovery.pool_id,
+                dex = %discovery.dex_name,
+                "Pool rejected: invalid empty pool ID or DEX name"
+            );
+            return false;
+        }
+
+        // Validate that the DEX is known to the event router
+        if !self.event_router.is_dex_supported(&discovery.dex_name) {
+            tracing::debug!(
+                pool_id = %discovery.pool_id,
+                dex = %discovery.dex_name,
+                "Pool rejected: unknown/unsupported DEX"
+            );
+            return false;
+        }
+
         // Check DEX whitelist
         if let Some(ref dex_whitelist) = self.filter_config.dex_whitelist {
             if !dex_whitelist.contains(&discovery.dex_name) {
@@ -389,11 +424,12 @@ impl PoolStateManager {
             let known_count = self.known_pools.read().await.len();
             let pending_count = self.pending_pools.read().await.len();
 
-            if known_count + pending_count >= max_pools {
+            if known_count + pending_count + pools_added_in_batch >= max_pools {
                 tracing::debug!(
                     pool_id = %discovery.pool_id,
                     known_pools = known_count,
                     pending_pools = pending_count,
+                    batch_pools = pools_added_in_batch,
                     max_pools = max_pools,
                     "Pool rejected: maximum tracked pools limit reached"
                 );

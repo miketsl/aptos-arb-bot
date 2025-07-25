@@ -226,6 +226,48 @@ impl DataSource for FileSource {
     }
 }
 
+impl FileSource {
+    /// Get the next complete batch from the file, useful for batch-level processing
+    pub async fn next_batch(&mut self) -> Result<Option<RecordedBatch>, DataSourceError> {
+        if !self.is_active {
+            return Err(DataSourceError::Internal(
+                "Data source not started".to_string(),
+            ));
+        }
+
+        let buf = self
+            .buf
+            .as_mut()
+            .ok_or_else(|| DataSourceError::Internal("Buffer not initialized".to_string()))?;
+
+        if buf.is_empty() {
+            return Ok(None);
+        }
+
+        // Decode the next length-delimited RecordedBatch from the file
+        let batch = RecordedBatch::decode_length_delimited(buf)
+            .map_err(|e| DataSourceError::ParseError(e.to_string()))?;
+
+        // Handle timing for replay speed (skip if fast-forward mode)
+        if !self.is_fast_forward_mode() {
+            self.handle_replay_timing(batch.timestamp_ms).await;
+        }
+
+        // Process embedded pool states
+        if !batch.pool_initializations.is_empty() {
+            let batch_timestamp = SystemTime::now();
+            self.process_pool_initializations(batch.pool_initializations.clone(), batch_timestamp);
+            tracing::info!(
+                pool_count = batch.pool_initializations.len(),
+                batch_start_version = batch.start_version,
+                "Processed embedded pool states from recorded batch"
+            );
+        }
+
+        Ok(Some(batch))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

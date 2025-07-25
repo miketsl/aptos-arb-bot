@@ -295,6 +295,22 @@ impl RecordingMonitor {
         self.stats.read().await.clone()
     }
 
+    /// Record batch processing (for test compatibility)
+    pub async fn record_batch_processed(&self, pools: u64, transactions: u64, errors: u64) {
+        let mut stats = self.stats.write().await;
+        stats.record_batch_processed(100, transactions, 1024); // Default processing time and bytes
+
+        // Record pool discoveries
+        for _ in 0..pools {
+            stats.record_pool_discovered(true);
+        }
+
+        // Record parsing errors
+        for _ in 0..errors {
+            stats.record_parsing_error();
+        }
+    }
+
     /// Check if recording should continue based on limits
     pub async fn should_continue(&self, max_batches: u64, max_duration_seconds: u64) -> bool {
         let stats = self.stats.read().await;

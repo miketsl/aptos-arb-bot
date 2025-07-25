@@ -139,8 +139,10 @@ async fn test_filtering_logic() {
     let event_router = create_test_event_router();
 
     // Test with DEX whitelist
-    let mut dex_filter_config = PoolFilterConfig::default();
-    dex_filter_config.dex_whitelist = Some(vec!["hyperion".to_string()]);
+    let dex_filter_config = PoolFilterConfig {
+        dex_whitelist: Some(vec!["hyperion".to_string()]),
+        ..Default::default()
+    };
 
     let manager = PoolStateManager::new(
         event_router.clone(),
@@ -177,8 +179,10 @@ async fn test_filtering_logic() {
     btc_pool.token_b = "ETH".to_string();
 
     // Test token whitelist
-    let mut token_filter_config = PoolFilterConfig::default();
-    token_filter_config.token_whitelist = Some(vec!["APT".to_string(), "USDC".to_string()]);
+    let token_filter_config = PoolFilterConfig {
+        token_whitelist: Some(vec!["APT".to_string(), "USDC".to_string()]),
+        ..Default::default()
+    };
 
     let token_manager = PoolStateManager::new(
         event_router.clone(),
@@ -190,8 +194,10 @@ async fn test_filtering_logic() {
     assert!(!token_manager.should_track_pool_with_state(&btc_pool));
 
     // Test token blacklist
-    let mut blacklist_config = PoolFilterConfig::default();
-    blacklist_config.token_blacklist = Some(vec!["BTC".to_string()]);
+    let blacklist_config = PoolFilterConfig {
+        token_blacklist: Some(vec!["BTC".to_string()]),
+        ..Default::default()
+    };
 
     let blacklist_manager =
         PoolStateManager::new(event_router, DataSourceType::Live, blacklist_config);
@@ -301,8 +307,8 @@ async fn test_worker_result_flow() {
     // Test basic worker sender/receiver setup
     let worker_tx = manager.get_worker_result_sender();
     assert!(
-        worker_tx.is_closed() == false,
-        "Worker sender should be open"
+        !worker_tx.is_closed(),
+        "Worker channel should not be closed initially"
     );
 
     // Test pool discovery processing
@@ -386,8 +392,10 @@ async fn test_max_tracked_pools_limit() {
     let event_router = create_test_event_router();
 
     // Set very low limit for testing
-    let mut limited_config = PoolFilterConfig::default();
-    limited_config.max_tracked_pools = Some(3);
+    let limited_config = PoolFilterConfig {
+        max_tracked_pools: Some(3),
+        ..Default::default()
+    };
 
     let manager = PoolStateManager::new(event_router, DataSourceType::Live, limited_config);
 
@@ -516,8 +524,10 @@ async fn test_cleanup_operations() {
 async fn test_pool_type_filtering() {
     let event_router = create_test_event_router();
 
-    let mut pool_type_config = PoolFilterConfig::default();
-    pool_type_config.pool_type_whitelist = Some(vec!["constant_product".to_string()]);
+    let pool_type_config = PoolFilterConfig {
+        pool_type_whitelist: Some(vec!["constant_product".to_string()]),
+        ..Default::default()
+    };
 
     let manager = PoolStateManager::new(event_router, DataSourceType::Live, pool_type_config);
 

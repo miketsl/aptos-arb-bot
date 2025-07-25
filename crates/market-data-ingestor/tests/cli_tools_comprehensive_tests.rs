@@ -485,7 +485,7 @@ fn test_converter_error_handling() {
     let temp_pb2 = NamedTempFile::new().expect("Failed to create temp protobuf file");
 
     fs::write(temp_pb1.path(), create_test_protobuf_data()).expect("Failed to write pb1");
-    fs::write(temp_pb2.path(), &[1, 2, 3, 4]).expect("Failed to write pb2"); // Invalid protobuf
+    fs::write(temp_pb2.path(), [1, 2, 3, 4]).expect("Failed to write pb2"); // Invalid protobuf
 
     let temp_json = NamedTempFile::new().expect("Failed to create temp JSON file");
     fs::write(temp_json.path(), "[{\"test\": \"data\"}]").expect("Failed to write JSON");
@@ -554,9 +554,9 @@ fn test_converter_filtering_options() {
         .arg("--output")
         .arg(temp_filtered_json.path())
         .arg("--start-time")
-        .arg("1641050") // Timestamp in seconds (middle range)
+        .arg("1641050000") // Timestamp in seconds (middle range) - fixed to match data scale
         .arg("--end-time")
-        .arg("1641150")
+        .arg("1641150000")
         .output()
         .expect("Failed to run filtered conversion");
 
@@ -647,8 +647,8 @@ fn test_inspector_comprehensive() {
             || stderr.contains("inspector")
             || stderr.contains("input")
             || stdout.contains("inspector")
-            || stdout.len() > 0
-            || stderr.len() > 0,
+            || !stdout.is_empty()
+            || !stderr.is_empty(),
         "Inspector should produce some output or meaningful error"
     );
 }
@@ -735,7 +735,7 @@ fn test_help_and_version() {
         version_stdout.contains("mdi-converter")
             || version_stdout.contains("version")
             || version_stdout.contains("2.0")
-            || version_stdout.len() > 0
+            || !version_stdout.is_empty()
     );
 }
 

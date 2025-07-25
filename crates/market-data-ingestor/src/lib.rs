@@ -13,11 +13,23 @@ pub use processor::MarketDataIngestorProcessor;
 
 // Export the data source abstractions
 pub use data_source::{
-    ConnectionState, ConnectionStats, DataSource, DataSourceError, EventMetadata, FileSource,
-    GrpcSource, PoolInitialization, RawEvent, ReconnectionConfig, RecordedBatch, RecordedPoolState,
+    ConnectionState,
+    ConnectionStats,
+    DataSource,
+    DataSourceError,
+    EventMetadata,
+    FileSource,
+    FileSource as FileDataSource, // Alias for test compatibility
+    GrpcSource,
+    PoolInitialization,
+    RawEvent,
+    ReconnectionConfig,
+    RecordedBatch,
+    RecordedPoolState,
     TimestampedEvent,
 };
 pub use pool_state_manager::{
     CachedPoolState, DataSourceType, PoolDiscovery, PoolFilterConfig, PoolStateManager,
     PoolStateStats, PoolStatus, RegistrySizes, WorkerResult,
 };
+pub use recording_config::MonitoringSettings;

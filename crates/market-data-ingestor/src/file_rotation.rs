@@ -65,6 +65,11 @@ impl FileRotationManager {
         Ok(())
     }
 
+    /// Write data (async version for test compatibility)
+    pub async fn write_data(&mut self, data: &[u8]) -> Result<()> {
+        self.write(data)
+    }
+
     /// Flush current writer
     pub fn flush(&mut self) -> Result<()> {
         if let Some(writer) = &mut self.current_file {
