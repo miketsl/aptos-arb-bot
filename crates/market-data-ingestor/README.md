@@ -84,3 +84,37 @@ The ingestor processes two main types of events:
 2. **SwapAfterEvent**: Real-time price updates
    - Updates sqrt_price, liquidity, and tick after each swap
    - Generates MarketUpdate for the detector
+
+## Production Stability Testing
+
+The MDI includes comprehensive production stability tests that validate 24/7 operational readiness:
+
+### Running Stability Tests
+
+```bash
+# Run all production stability tests
+cargo test production_stability_tests --release
+
+# Run specific stability tests
+cargo test test_24_hour_memory_stability --release
+cargo test test_grpc_to_file_failover --release
+cargo test test_performance_regression --release
+cargo test test_cache_extreme_load --release
+```
+
+### Test Coverage
+
+- **Memory Stability**: 24-hour simulation testing for memory leaks and cache behavior
+- **Failover Testing**: gRPC ↔ File data source switching validation  
+- **Performance Regression**: Throughput and latency baseline enforcement
+- **Cache Extreme Load**: Validates cache overflow handling under stress
+
+### Test Features
+
+- **Accelerated Testing**: 24-hour simulations complete in ~4 minutes
+- **Memory Leak Detection**: Linear regression analysis of memory growth
+- **Realistic Load Patterns**: Variable workload simulating daily traffic patterns
+- **Cache Behavior Validation**: Block-boundary memory management testing
+- **Failover Simulation**: Mock gRPC failures with file source fallback
+
+These tests ensure production deployment readiness and operational stability.

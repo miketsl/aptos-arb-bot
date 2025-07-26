@@ -8,6 +8,13 @@
 - Run a single test: `cargo test <test_name>` or `cargo test --test <file_name>`
 - Run with output: `cargo test -- --nocapture`
 
+## Production Stability Tests
+- Run stability tests: `cargo test production_stability_tests --release`
+- Memory stability: `cargo test test_24_hour_memory_stability --release` 
+- Failover testing: `cargo test test_grpc_to_file_failover --release`
+- Performance regression: `cargo test test_performance_regression --release`
+- Cache extreme load: `cargo test test_cache_extreme_load --release`
+
 ## Code Style Guidelines
 - Use `rustfmt` for formatting; always run `cargo fmt` before submitting.
 - Imports: Group std, external, and internal separately; use explicit paths.

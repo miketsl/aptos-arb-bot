@@ -119,7 +119,8 @@ async fn test_cache_ttl_and_cleanup() {
             "cache_test_pool".to_string(),
             create_test_pool_state("cache_test_pool"),
         )
-        .await;
+        .await
+        .expect("Cache operation should succeed");
 
     let sizes = manager.get_registry_sizes().await;
     assert_eq!(sizes.cached_states, 1);
@@ -285,10 +286,12 @@ async fn test_statistics_tracking() {
     // Test cache statistics
     manager
         .cache_pool_state("cache_1".to_string(), create_test_pool_state("cache_1"))
-        .await;
+        .await
+        .expect("Cache operation 1 should succeed");
     manager
         .cache_pool_state("cache_2".to_string(), create_test_pool_state("cache_2"))
-        .await;
+        .await
+        .expect("Cache operation 2 should succeed");
 
     let cache_stats = manager.get_stats().await;
     assert_eq!(cache_stats.cache_misses, 2); // Two new cache entries
@@ -498,10 +501,12 @@ async fn test_cleanup_operations() {
     // Cache some states
     manager
         .cache_pool_state("short_lived".to_string(), short_cache.state.clone())
-        .await;
+        .await
+        .expect("Short-lived cache should succeed");
     manager
         .cache_pool_state("long_lived".to_string(), long_cache.state.clone())
-        .await;
+        .await
+        .expect("Long-lived cache should succeed");
 
     // Initial state
     let initial_sizes = manager.get_registry_sizes().await;
@@ -565,7 +570,8 @@ async fn test_concurrent_cache_with_ttls() {
             let pool_state = create_test_pool_state(&format!("concurrent_pool_{}", i));
             manager_clone
                 .cache_pool_state(format!("concurrent_pool_{}", i), pool_state)
-                .await;
+                .await
+                .expect("Concurrent cache operation should succeed");
         });
         handles.push(handle);
     }

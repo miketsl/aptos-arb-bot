@@ -38,6 +38,11 @@ pub struct PoolDiscoveryMetrics {
     pub pool_fetch_success_rate: f64,
     pub cache_hit_rate: f64,
     pub discovery_latency_ms: f64,
+    pub cache_size_current: u64,
+    pub cache_overflows_total: u64,
+    pub cache_forced_evictions_total: u64,
+    pub max_cache_size_configured: u64,
+    pub cache_retention_seconds_configured: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +112,12 @@ pub struct PrometheusMetrics {
 
     pub connection_status: GaugeVec,
     pub throughput: GaugeVec,
+
+    pub cache_size_current: Gauge,
+    pub cache_overflows_total: Counter,
+    pub cache_forced_evictions_total: Counter,
+    pub max_cache_size_configured: Gauge,
+    pub cache_retention_seconds_configured: Gauge,
 }
 
 impl PrometheusMetrics {
@@ -210,6 +221,31 @@ impl PrometheusMetrics {
         )?;
         registry.register(Box::new(throughput.clone()))?;
 
+        let cache_size_current = Gauge::new("mdi_cache_size_current", "Current cache size")?;
+        registry.register(Box::new(cache_size_current.clone()))?;
+
+        let cache_overflows_total =
+            Counter::new("mdi_cache_overflows_total", "Total cache overflows")?;
+        registry.register(Box::new(cache_overflows_total.clone()))?;
+
+        let cache_forced_evictions_total = Counter::new(
+            "mdi_cache_forced_evictions_total",
+            "Total forced cache evictions",
+        )?;
+        registry.register(Box::new(cache_forced_evictions_total.clone()))?;
+
+        let max_cache_size_configured = Gauge::new(
+            "mdi_max_cache_size_configured",
+            "Maximum configured cache size",
+        )?;
+        registry.register(Box::new(max_cache_size_configured.clone()))?;
+
+        let cache_retention_seconds_configured = Gauge::new(
+            "mdi_cache_retention_seconds_configured",
+            "Configured cache retention in seconds",
+        )?;
+        registry.register(Box::new(cache_retention_seconds_configured.clone()))?;
+
         Ok(Self {
             registry,
             transactions_processed,
@@ -232,6 +268,11 @@ impl PrometheusMetrics {
             error_rate,
             connection_status,
             throughput,
+            cache_size_current,
+            cache_overflows_total,
+            cache_forced_evictions_total,
+            max_cache_size_configured,
+            cache_retention_seconds_configured,
         })
     }
 
@@ -452,8 +493,13 @@ impl MetricsCollector {
                 pools_rejected: stats.pools_rejected,
                 pool_states_fetched: stats.pool_states_fetched,
                 pool_fetch_success_rate: pool_success_rate,
-                cache_hit_rate: 0.0,       // TODO: Add cache metrics
-                discovery_latency_ms: 0.0, // TODO: Add discovery latency tracking
+                cache_hit_rate: 0.0,                    // TODO: Add cache metrics
+                discovery_latency_ms: 0.0,              // TODO: Add discovery latency tracking
+                cache_size_current: 0,                  // Will be updated in implementation
+                cache_overflows_total: 0,               // Track separately from recording stats
+                cache_forced_evictions_total: 0,        // Track separately from TTL evictions
+                max_cache_size_configured: 500,         // Default value, should come from config
+                cache_retention_seconds_configured: 30, // Default value, should come from config
             },
             system_health: SystemHealthMetrics {
                 memory_usage_mb: memory_used as f64 / 1024.0 / 1024.0,

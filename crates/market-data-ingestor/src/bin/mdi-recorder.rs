@@ -272,6 +272,8 @@ fn create_pool_filter_config(config: &RecordingConfig) -> PoolFilterConfig {
         dex_whitelist: config.pool_detection.filters.dex_whitelist.clone(),
         pool_type_whitelist: config.pool_detection.filters.pool_type_whitelist.clone(),
         max_tracked_pools: Some(config.pool_detection.filters.max_tracked_pools as usize),
+        max_cache_size_per_block: Some(500),
+        max_cache_retention_seconds: Some(30),
     }
 }
 

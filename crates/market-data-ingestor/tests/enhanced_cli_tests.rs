@@ -280,6 +280,8 @@ fn test_pool_filter_config_creation() {
             .pool_type_whitelist
             .clone(),
         max_tracked_pools: Some(recording_config.pool_detection.filters.max_tracked_pools as usize),
+        max_cache_size_per_block: Some(500),
+        max_cache_retention_seconds: Some(30),
     };
 
     assert_eq!(pool_filter.max_tracked_pools, Some(5000));

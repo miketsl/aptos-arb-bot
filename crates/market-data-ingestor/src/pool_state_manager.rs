@@ -56,6 +56,10 @@ pub struct PoolFilterConfig {
     pub pool_type_whitelist: Option<Vec<String>>,
     /// Maximum number of pools to track simultaneously
     pub max_tracked_pools: Option<usize>,
+    /// Maximum pool states that can accumulate in cache between block boundaries
+    pub max_cache_size_per_block: Option<usize>,
+    /// Maximum time (seconds) a pool state can remain in cache before forced eviction
+    pub max_cache_retention_seconds: Option<u64>,
 }
 
 impl Default for PoolFilterConfig {
@@ -67,6 +71,8 @@ impl Default for PoolFilterConfig {
             dex_whitelist: None,
             pool_type_whitelist: None,
             max_tracked_pools: Some(10000), // Reasonable default limit
+            max_cache_size_per_block: Some(500), // Max 500 pools per block
+            max_cache_retention_seconds: Some(30), // Max 30 seconds in cache
         }
     }
 }
@@ -207,14 +213,63 @@ impl PoolStateManager {
     }
 
     /// Add a completed pool state to the cache
-    pub async fn cache_pool_state(&self, pool_id: PoolId, pool_state: PoolState) {
-        let cached_state = CachedPoolState::new(pool_state, self.default_cache_ttl);
+    pub async fn cache_pool_state(
+        &self,
+        pool_id: PoolId,
+        pool_state: PoolState,
+    ) -> Result<(), String> {
         let mut cache = self.new_pool_state_cache.write().await;
+
+        // Check cache size limit
+        if let Some(max_size) = self.filter_config.max_cache_size_per_block {
+            if cache.len() >= max_size {
+                return Err(format!("Cache size limit reached: {} pools", max_size));
+            }
+        }
+
+        let cached_state = CachedPoolState::new(pool_state, self.default_cache_ttl);
         cache.insert(pool_id, cached_state);
 
         // Update stats
         let mut stats = self.stats.write().await;
-        stats.cache_misses += 1; // This was a new fetch
+        stats.cache_misses += 1;
+
+        Ok(())
+    }
+
+    pub async fn handle_cache_overflow(&self) -> usize {
+        let mut cache = self.new_pool_state_cache.write().await;
+        let mut stats = self.stats.write().await;
+
+        let max_size = self
+            .filter_config
+            .max_cache_size_per_block
+            .unwrap_or(usize::MAX);
+
+        if cache.len() <= max_size {
+            return 0;
+        }
+
+        // Calculate how many to remove (remove oldest 20% when overflow occurs)
+        let overflow_count = cache.len() - max_size;
+        let eviction_count = std::cmp::max(overflow_count, cache.len() / 5);
+
+        // Collect oldest entries by cached_at timestamp
+        let mut entries: Vec<_> = cache
+            .iter()
+            .map(|(id, state)| (id.clone(), state.cached_at))
+            .collect();
+        entries.sort_by_key(|(_, cached_at)| *cached_at);
+
+        // Remove oldest entries
+        let mut removed_count = 0;
+        for (pool_id, _) in entries.into_iter().take(eviction_count) {
+            cache.remove(&pool_id);
+            removed_count += 1;
+        }
+
+        stats.cache_evictions += removed_count as u64;
+        removed_count
     }
 
     /// Get all completed pool states from cache and clear them
@@ -263,28 +318,46 @@ impl PoolStateManager {
     }
 
     /// Clean up expired cache entries
-    pub async fn cleanup_expired_cache(&self) {
+    pub async fn cleanup_expired_cache(&self) -> usize {
         let mut cache = self.new_pool_state_cache.write().await;
+        let mut stats = self.stats.write().await;
+
+        let max_retention = Duration::from_secs(
+            self.filter_config
+                .max_cache_retention_seconds
+                .unwrap_or(u64::MAX),
+        );
+
         let mut expired_keys = Vec::new();
+        let now = Instant::now();
 
         for (pool_id, cached_state) in cache.iter() {
-            if cached_state.is_expired() {
+            // Check both TTL expiration and retention limit
+            let ttl_expired = cached_state.is_expired();
+            let retention_exceeded = now.duration_since(cached_state.cached_at) > max_retention;
+
+            if ttl_expired || retention_exceeded {
                 expired_keys.push(pool_id.clone());
+
+                if retention_exceeded {
+                    let retention_exceeded_duration = now.duration_since(cached_state.cached_at);
+                    tracing::warn!(
+                        pool_id = %pool_id,
+                        retention_seconds = retention_exceeded_duration.as_secs(),
+                        max_retention = max_retention.as_secs(),
+                        "Pool state removed due to retention limit"
+                    );
+                }
             }
         }
 
-        let mut stats = self.stats.write().await;
+        let removed_count = expired_keys.len();
         for key in expired_keys {
             cache.remove(&key);
-            stats.cache_evictions += 1;
         }
 
-        if stats.cache_evictions > 0 {
-            tracing::debug!(
-                evicted = stats.cache_evictions,
-                "Cleaned up expired pool state cache entries"
-            );
-        }
+        stats.cache_evictions += removed_count as u64;
+        removed_count
     }
 
     /// Extract pool IDs from a transaction using the event router
@@ -598,16 +671,47 @@ impl PoolStateManager {
                     // Apply advanced filtering that requires pool state
                     if self.should_track_pool_with_state(&pool_state) {
                         // Cache the pool state
-                        self.cache_pool_state(result.pool_id.clone(), pool_state)
-                            .await;
-                        stats.pools_accepted += 1;
+                        match self
+                            .cache_pool_state(result.pool_id.clone(), pool_state.clone())
+                            .await
+                        {
+                            Ok(()) => {
+                                stats.pools_accepted += 1;
 
-                        tracing::info!(
-                            pool_id = %result.pool_id,
-                            dex = %result.dex_name,
-                            duration_ms = result.fetch_duration.as_millis(),
-                            "Pool accepted and cached"
-                        );
+                                tracing::info!(
+                                    pool_id = %result.pool_id,
+                                    dex = %result.dex_name,
+                                    duration_ms = result.fetch_duration.as_millis(),
+                                    "Pool accepted and cached"
+                                );
+                            }
+                            Err(cache_error) => {
+                                // Handle cache full scenario - remove old entries and retry
+                                let removed = self.handle_cache_overflow().await;
+                                tracing::warn!(
+                                    removed_entries = removed,
+                                    pool_id = %result.pool_id,
+                                    error = %cache_error,
+                                    "Cache overflow: removed old entries and retrying"
+                                );
+
+                                // Retry caching after cleanup
+                                if let Err(retry_error) = self
+                                    .cache_pool_state(result.pool_id.clone(), pool_state)
+                                    .await
+                                {
+                                    tracing::error!(
+                                        pool_id = %result.pool_id,
+                                        error = %retry_error,
+                                        "Failed to cache pool state even after cleanup"
+                                    );
+                                    // Add to rejected pools if we can't cache it
+                                    self.add_rejected_pool(result.pool_id.clone()).await;
+                                } else {
+                                    stats.pools_accepted += 1;
+                                }
+                            }
+                        }
                     } else {
                         // Pool was rejected by advanced filters
                         self.add_rejected_pool(result.pool_id.clone()).await;
@@ -752,11 +856,32 @@ impl PoolStateManagerHandle {
 
                     // Apply advanced filtering that requires pool state
                     if self.should_track_pool_with_state(&pool_state) {
-                        // Cache the pool state
+                        // Try to cache the pool state with overflow protection
                         let cached_state = CachedPoolState::new(pool_state, self.default_cache_ttl);
                         {
                             let mut cache = self.new_pool_state_cache.write().await;
-                            cache.insert(result.pool_id.clone(), cached_state);
+
+                            // Check cache size and handle overflow
+                            if let Some(max_size) = self.filter_config.max_cache_size_per_block {
+                                if cache.len() >= max_size {
+                                    // Force cleanup before adding new entry
+                                    drop(cache); // Release lock for cleanup
+                                    let removed = self.handle_cache_overflow().await;
+                                    tracing::warn!(
+                                        removed_entries = removed,
+                                        pool_id = %result.pool_id,
+                                        "Cache overflow: removed old entries before adding new pool"
+                                    );
+
+                                    // Reacquire lock and try again
+                                    let mut cache = self.new_pool_state_cache.write().await;
+                                    cache.insert(result.pool_id.clone(), cached_state);
+                                } else {
+                                    cache.insert(result.pool_id.clone(), cached_state);
+                                }
+                            } else {
+                                cache.insert(result.pool_id.clone(), cached_state);
+                            }
                         }
                         stats.pools_accepted += 1;
 
@@ -801,6 +926,49 @@ impl PoolStateManagerHandle {
                 }
             }
         }
+    }
+
+    pub async fn handle_cache_overflow(&self) -> usize {
+        let mut cache = self.new_pool_state_cache.write().await;
+        let mut stats = self.stats.write().await;
+
+        let max_size = self
+            .filter_config
+            .max_cache_size_per_block
+            .unwrap_or(usize::MAX);
+
+        if cache.len() <= max_size {
+            return 0;
+        }
+
+        // Calculate how many to remove (remove oldest 20% when overflow occurs)
+        let overflow_count = cache.len() - max_size;
+        let eviction_count = std::cmp::max(overflow_count, cache.len() / 5);
+
+        // Collect oldest entries by cached_at timestamp
+        let mut entries: Vec<_> = cache
+            .iter()
+            .map(|(id, state)| (id.clone(), state.cached_at))
+            .collect();
+        entries.sort_by_key(|(_, cached_at)| *cached_at);
+
+        // Remove oldest entries
+        let mut removed_count = 0;
+        for (pool_id, _) in entries.into_iter().take(eviction_count) {
+            cache.remove(&pool_id);
+            removed_count += 1;
+        }
+
+        stats.cache_evictions += removed_count as u64;
+
+        tracing::error!(
+            cache_size = cache.len(),
+            max_size = max_size,
+            removed_count = removed_count,
+            "Cache overflow: forcibly removed pool states due to memory pressure"
+        );
+
+        removed_count
     }
 
     /// Apply advanced filtering that requires pool state data
@@ -955,7 +1123,7 @@ mod tests {
         };
 
         // Cache a pool state
-        manager
+        let _ = manager
             .cache_pool_state("test_pool".to_string(), pool_state.clone())
             .await;
 

@@ -91,6 +91,11 @@ impl MarketDataIngestorProcessor {
                     pool_fetch_success_rate: 0.0,
                     cache_hit_rate: 0.0,
                     discovery_latency_ms: 0.0,
+                    cache_size_current: 0,
+                    cache_overflows_total: 0,
+                    cache_forced_evictions_total: 0,
+                    max_cache_size_configured: 0,
+                    cache_retention_seconds_configured: 0,
                 },
                 system_health: crate::monitoring::SystemHealthMetrics {
                     memory_usage_mb: 0.0,
@@ -137,7 +142,7 @@ impl MarketDataIngestorProcessor {
         if let Some(block_height) = metadata.block_height {
             let previous_block = self.live_stats.last_block_number;
             self.live_stats.last_block_number = Some(block_height);
-            
+
             match previous_block {
                 None => {
                     // First block we've seen

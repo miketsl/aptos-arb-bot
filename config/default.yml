@@ -27,6 +27,8 @@ ingestor:
       - ["APT", "USDC"]
       - ["APT", "USDT"]
     min_liquidity: "1000"
+    max_cache_size_per_block: 500
+    max_cache_retention_seconds: 30
   
   # Performance and monitoring configuration
   performance:
