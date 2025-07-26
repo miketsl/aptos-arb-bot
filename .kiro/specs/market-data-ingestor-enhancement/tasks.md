@@ -31,7 +31,7 @@
   - Write integration tests for timing accuracy, event ordering, and pool state initialization
   - _Requirements: 1.3, 1.4, 1.5, 8.1, 8.3_
 
-- [ ] 5. Develop enhanced test data recording and conversion tooling with pool state embedding
+- [x] 5. Develop enhanced test data recording and conversion tooling with pool state embedding
   - Create recording utility that captures gRPC stream to protobuf files with pool state detection
   - Implement pool state fetching during recording when unknown pools are discovered
   - Add pool state embedding into RecordedBatch structures during live recording
@@ -89,7 +89,7 @@
   - Write performance tests for complete pipeline latency
   - _Requirements: 1.5, 5.1_
 
-- [ ] 12. Implement data source-aware pool state management system for cold boot problem
+- [x] 12. Implement data source-aware pool state management system for cold boot problem
   - Create PoolStateManager struct with data source type awareness and multiple registries
   - Implement thread-safe registries for known_pools, rejected_pools, pending_pools, and new_pool_state_cache
   - Add data source-specific pool discovery logic (REST API for live, embedded data for replay)
@@ -98,7 +98,7 @@
   - Write unit tests for both live and replay pool discovery scenarios
   - _Requirements: 7.1, 7.5, 7.6, 8.1, 8.3_
 
-- [ ] 13. Build separate DEX-specific pool state providers for REST API integration
+- [x] 13. Build separate DEX-specific pool state providers for REST API integration
   - Create new PoolStateProvider implementations as separate components from DEX adapters
   - Implement HyperionStateProvider with async HTTP client for Hyperion REST API endpoints
   - Create ThalaStateProvider for Thala DEX REST API with rate limiting and proper error handling
@@ -107,7 +107,7 @@
   - Write unit tests with mock HTTP clients and async test utilities for each provider
   - _Requirements: 7.2, 7.4_
 
-- [ ] 14. Integrate data source-aware pool discovery with block-aligned event processing
+- [x] 14. Integrate data source-aware pool discovery with block-aligned event processing
   - Modify DEX adapters to extract pool references and check registries before processing
   - Implement event dropping logic for newly discovered pools during live async state fetch
   - Add embedded pool state processing at batch start for file replay scenarios
