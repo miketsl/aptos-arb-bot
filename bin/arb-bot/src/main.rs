@@ -4,7 +4,7 @@ use clap::Parser;
 use common::types::{ClmmMarketUpdate, DetectorMessage, MarketUpdate, TokenPair};
 use config::Config;
 use detector::DetectorService;
-use dex_adapter_trait::DexAdapter;
+use dex_adapters::DexAdapter;
 use dex_adapters::{HyperionAdapter, TappAdapter, ThalaAdapter};
 use market_data_ingestor::{IndexerProcessorConfig, MarketDataIngestorProcessor};
 use std::collections::HashMap;
@@ -30,27 +30,43 @@ async fn main() -> Result<()> {
     let config_str = fs::read_to_string(&args.config)?;
     let config: Config = serde_yaml::from_str(&config_str).expect("Failed to parse config");
 
-    // Instantiate adapters based on the configuration
+    // Ensure ingestor config is present
+    let ingestor_config = config.ingestor
+        .expect("Enhanced ingestor configuration is required. Please add 'ingestor' section to your config file.");
+
+    // Instantiate adapters based on the enhanced configuration
     let mut adapters: HashMap<String, Arc<dyn DexAdapter>> = HashMap::new();
-    for dex_config in &config.market_data_config.dexs {
-        let adapter: Arc<dyn DexAdapter> = match dex_config.name.as_str() {
-            "Hyperion" => Arc::new(HyperionAdapter::default()),
-            "ThalaSwap" => Arc::new(ThalaAdapter::default()),
-            "Tapp" => Arc::new(TappAdapter::default()),
+    for adapter_config in &ingestor_config.adapters {
+        if !adapter_config.enabled {
+            continue; // Skip disabled adapters
+        }
+
+        let adapter: Arc<dyn DexAdapter> = match adapter_config.name.as_str() {
+            "hyperion" => Arc::new(HyperionAdapter::new(vec![adapter_config
+                .module_address
+                .clone()])),
+            "thala" => Arc::new(ThalaAdapter::new(vec![adapter_config
+                .module_address
+                .clone()])),
+            "tapp" => Arc::new(TappAdapter::new(vec![adapter_config
+                .module_address
+                .clone()])),
             _ => {
-                anyhow::bail!("Unknown adapter: {}", dex_config.name);
+                anyhow::bail!("Unknown adapter: {}", adapter_config.name);
             }
         };
 
-        for event_suffix in dex_config.events.values() {
-            let full_event_type = format!("{}{}", dex_config.module_address, event_suffix);
+        for event_suffix in adapter_config.events.values() {
+            let full_event_type = format!("{}{}", adapter_config.module_address, event_suffix);
             adapters.insert(full_event_type, adapter.clone());
         }
     }
 
-    // Create the MDI config
-    let mdi_config =
-        IndexerProcessorConfig::new(config.transaction_stream_config, config.market_data_config);
+    // Create the MDI config using enhanced configuration
+    let mdi_config = IndexerProcessorConfig::from_enhanced_config(
+        config.transaction_stream_config,
+        ingestor_config,
+    );
 
     // --- New Channel Setup ---
     // Channel for MDI -> Detector communication (block messages + updates)

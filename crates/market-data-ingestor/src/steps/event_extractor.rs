@@ -1,6 +1,6 @@
 use anyhow::Result;
 use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::{Event, Transaction};
-use config_lib::DexConfig;
+use config_lib::{AdapterConfig, DexConfig};
 use std::collections::HashSet;
 use tracing::{info, trace};
 
@@ -20,6 +20,30 @@ impl EventExtractorStep {
                 key.push_str(&dex.module_address);
                 key.push_str(event_suffix);
                 relevant_event_types.insert(key);
+            }
+        }
+        info!(
+            "EventExtractor initialized with event types: {:?}",
+            relevant_event_types
+        );
+        Self {
+            relevant_event_types,
+        }
+    }
+
+    pub fn from_adapter_configs(adapter_configs: Vec<AdapterConfig>) -> Self {
+        // Pre-allocate and build full event-type keys once to avoid repeated re-allocations
+        let total = adapter_configs.iter().map(|a| a.events.len()).sum();
+        let mut relevant_event_types = HashSet::with_capacity(total);
+        for adapter in adapter_configs {
+            if adapter.enabled {
+                for event_suffix in adapter.events.values() {
+                    let mut key =
+                        String::with_capacity(adapter.module_address.len() + event_suffix.len());
+                    key.push_str(&adapter.module_address);
+                    key.push_str(event_suffix);
+                    relevant_event_types.insert(key);
+                }
             }
         }
         info!(

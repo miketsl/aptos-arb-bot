@@ -1,55 +1,92 @@
-use anyhow::Result;
-use aptos_indexer_processor_sdk::aptos_indexer_transaction_stream::{
-    TransactionStream, TransactionStreamConfig, TransactionsPBResponse,
-};
-use async_trait::async_trait;
+// Re-export everything from the modular structure
+pub mod file;
+pub mod grpc;
 
+// Re-export core types and traits
 use aptos_indexer_processor_sdk::aptos_protos::transaction::v1::Transaction as ProtoTransaction;
-use bytes::Bytes;
-use prost::Message;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    time::{Duration, Instant},
-};
-/// Abstracts the source of transaction data, allowing for live or prerecorded streams.
+use std::time::SystemTime;
+use thiserror::Error;
+
+pub use file::FileSource;
+pub use grpc::{ConnectionState, ConnectionStats, GrpcSource, ReconnectionConfig};
+
+/// Error types for data source operations
+#[derive(Error, Debug)]
+pub enum DataSourceError {
+    #[error("Connection failed: {0}")]
+    ConnectionFailed(String),
+    #[error("Data parsing failed: {0}")]
+    ParseError(String),
+    #[error("File not found: {0}")]
+    FileNotFound(String),
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(String),
+    #[error("Stream ended unexpectedly")]
+    StreamEnded,
+    #[error("Timeout occurred: {0}")]
+    Timeout(String),
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+
+/// Raw event data from the data source
+#[derive(Debug, Clone)]
+pub struct RawEvent {
+    /// The raw transaction data
+    pub transaction: ProtoTransaction,
+    /// Source-specific metadata
+    pub metadata: EventMetadata,
+}
+
+/// Timestamped event with processing metadata
+#[derive(Debug, Clone)]
+pub struct TimestampedEvent {
+    /// The raw event data
+    pub raw_event: RawEvent,
+    /// When this event was received by the data source
+    pub received_at: SystemTime,
+    /// Original timestamp from the blockchain
+    pub blockchain_timestamp: Option<SystemTime>,
+    /// Sequence number for ordering
+    pub sequence: u64,
+}
+
+/// Metadata associated with an event
+#[derive(Debug, Clone)]
+pub struct EventMetadata {
+    /// Version number of the transaction
+    pub version: u64,
+    /// Block height
+    pub block_height: Option<u64>,
+    /// Chain ID
+    pub chain_id: Option<u64>,
+    /// Size in bytes
+    pub size_bytes: Option<u64>,
+}
+
+/// Enhanced data source trait with lifecycle management
 #[async_trait]
 pub trait DataSource: Send {
-    /// Fetch the next batch of transactions from this source.
-    async fn get_next_batch(&mut self) -> Result<TransactionsPBResponse>;
+    /// Start the data source and begin producing events
+    async fn start(&mut self) -> Result<(), DataSourceError>;
+
+    /// Get the next event from the data source
+    async fn next_event(&mut self) -> Result<Option<TimestampedEvent>, DataSourceError>;
+
+    /// Stop the data source and clean up resources
+    async fn stop(&mut self) -> Result<(), DataSourceError>;
+
+    /// Check if the data source is currently active
+    fn is_active(&self) -> bool;
+
+    /// Get the name/type of this data source for logging
+    fn source_type(&self) -> &'static str;
 }
 
-/// Live data source using the Aptos gRPC transaction stream.
-pub struct GrpcSource {
-    inner: TransactionStream,
-}
-
-impl GrpcSource {
-    /// Wrap an existing `TransactionStream` from the given configuration.
-    pub async fn new(config: TransactionStreamConfig) -> Result<Self> {
-        let inner = TransactionStream::new(config).await?;
-        Ok(Self { inner })
-    }
-}
-
-#[async_trait]
-impl DataSource for GrpcSource {
-    async fn get_next_batch(&mut self) -> Result<TransactionsPBResponse> {
-        let batch = self.inner.get_next_transaction_batch().await?;
-        Ok(batch)
-    }
-}
-
-/// File-based data source for replaying prerecorded protobuf data (RecordedBatch).
-pub struct FileSource {
-    buf: Bytes,
-    first_timestamp_ms: Option<i64>,
-    start_instant: Instant,
-    replay_speed: f64,
-}
-
-/// Protobuf message for recorded batches, matching the architecture spec.
-#[derive(prost::Message, Serialize, Deserialize)]
+/// Protobuf message for recorded batches with embedded pool state, matching the architecture spec.
+#[derive(prost::Message, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordedBatch {
     #[prost(uint64, tag = "1")]
@@ -60,63 +97,53 @@ pub struct RecordedBatch {
     pub timestamp_ms: i64,
     #[prost(message, repeated, tag = "4")]
     pub transactions: Vec<ProtoTransaction>,
+    /// NEW: Embedded pool states for newly discovered pools in this batch
+    #[prost(message, repeated, tag = "5")]
+    pub pool_initializations: Vec<RecordedPoolState>,
 }
 
-impl FileSource {
-    /// Create a new file-based source from the given path and replay speed (1.0 = real-time).
-    pub fn new(path: String, replay_speed: f64) -> Result<Self> {
-        let data = fs::read(path)?;
-        Ok(Self {
-            buf: Bytes::from(data),
-            first_timestamp_ms: None,
-            start_instant: Instant::now(),
-            replay_speed,
-        })
-    }
+/// Recorded pool state for historical replay consistency
+/// Hybrid design: fast path for 2-token pools, complete data for multi-token pools
+#[derive(prost::Message, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordedPoolState {
+    #[prost(string, tag = "1")]
+    pub pool_id: String,
+    #[prost(string, tag = "2")]
+    pub dex_name: String,
+
+    // Fast path: Primary pair (covers 90% of pools)
+    #[prost(string, tag = "3")]
+    pub token_a: String,
+    #[prost(string, tag = "4")]
+    pub token_b: String,
+    #[prost(string, tag = "5")]
+    pub reserve_a: String, // Decimal as string for precision
+    #[prost(string, tag = "6")]
+    pub reserve_b: String, // Decimal as string for precision
+    #[prost(string, tag = "7")]
+    pub fee_rate: String, // Decimal as string for precision
+
+    // Complete data: For complex pools (optional for performance)
+    #[prost(string, repeated, tag = "10")]
+    pub all_tokens: Vec<String>, // Empty for 2-token pools, complete list for multi-token
+    #[prost(string, repeated, tag = "11")]
+    pub all_reserves: Vec<String>, // Empty for 2-token pools, complete list for multi-token
+    #[prost(uint32, repeated, tag = "12")]
+    pub all_weights: Vec<u32>, // Empty for non-weighted pools, weights for weighted pools
+
+    // Metadata
+    #[prost(string, tag = "13")]
+    pub pool_type: String, // "clmm", "weighted", "stable", "constant_product"
+    #[prost(uint64, tag = "8")]
+    pub block_height: u64,
+    #[prost(bytes, tag = "9")]
+    pub additional_data: Vec<u8>, // JSON serialized DEX-specific data
 }
 
-#[async_trait]
-impl DataSource for FileSource {
-    async fn get_next_batch(&mut self) -> Result<TransactionsPBResponse> {
-        // Decode the next length-delimited RecordedBatch from the file
-        let batch = RecordedBatch::decode_length_delimited(&mut self.buf)?;
-
-        // Manage replay timing based on recorded timestamps
-        if let Some(first_ts) = self.first_timestamp_ms {
-            let elapsed_ms = (batch.timestamp_ms - first_ts).max(0) as u64;
-            let delay = Duration::from_millis((elapsed_ms as f64 / self.replay_speed) as u64);
-            let target = self.start_instant + delay;
-            let now = Instant::now();
-            if target > now {
-                tokio::time::sleep(target - now).await;
-            }
-        } else {
-            self.first_timestamp_ms = Some(batch.timestamp_ms);
-            self.start_instant = Instant::now();
-        }
-
-        // Prepare TransactionsPBResponse from recorded data
-        let RecordedBatch {
-            start_version,
-            end_version,
-            transactions,
-            ..
-        } = batch;
-        // Recorded data does not include a chain_id; default to zero
-        let chain_id = 0;
-        let start_txn_timestamp = transactions.first().and_then(|t| t.timestamp);
-        let end_txn_timestamp = transactions.last().and_then(|t| t.timestamp);
-        // Size is unknown for replay; set to zero
-        let size_in_bytes = 0;
-
-        Ok(TransactionsPBResponse {
-            transactions,
-            chain_id,
-            start_version,
-            end_version,
-            start_txn_timestamp,
-            end_txn_timestamp,
-            size_in_bytes,
-        })
-    }
+/// Pool initialization event for detector integration
+#[derive(Debug, Clone)]
+pub struct PoolInitialization {
+    pub pool_state: RecordedPoolState,
+    pub timestamp: SystemTime,
 }

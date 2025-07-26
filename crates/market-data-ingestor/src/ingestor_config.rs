@@ -1,17 +1,17 @@
 use aptos_indexer_processor_sdk::aptos_indexer_transaction_stream::TransactionStreamConfig;
-use config_lib::{MarketDataConfig, YamlTransactionStreamConfig};
+use config_lib::{IngestorConfig, YamlTransactionStreamConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct IndexerProcessorConfig {
     pub transaction_stream_config: TransactionStreamConfig,
-    pub market_data_config: MarketDataConfig,
+    pub ingestor_config: IngestorConfig,
 }
 
 impl IndexerProcessorConfig {
-    pub fn new(
+    pub fn from_enhanced_config(
         yaml_config: YamlTransactionStreamConfig,
-        market_data_config: MarketDataConfig,
+        ingestor_config: IngestorConfig,
     ) -> Self {
         let transaction_stream_config =
             serde_json::from_value(serde_json::to_value(yaml_config).unwrap())
@@ -19,7 +19,7 @@ impl IndexerProcessorConfig {
 
         Self {
             transaction_stream_config,
-            market_data_config,
+            ingestor_config,
         }
     }
 }

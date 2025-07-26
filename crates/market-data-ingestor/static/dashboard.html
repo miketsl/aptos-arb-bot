@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Data Ingestor - Production Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #27ae60;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-dot.disconnected {
+            background: #e74c3c;
+        }
+        
+        .status-dot.degraded {
+            background: #f39c12;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .metric-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s ease;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-2px);
+        }
+        
+        .metric-card h3 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 0.5rem;
+        }
+        
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            padding: 0.25rem 0;
+        }
+        
+        .metric-label {
+            font-weight: 500;
+            color: #7f8c8d;
+        }
+        
+        .metric-value {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .metric-value.warning {
+            color: #f39c12;
+        }
+        
+        .metric-value.critical {
+            color: #e74c3c;
+        }
+        
+        .metric-value.good {
+            color: #27ae60;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 2rem;
+            padding: 1rem;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+        
+        .refresh-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+        
+        .auto-refresh {
+            animation: spin 1s linear;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .connection-quality {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .quality-excellent {
+            background: #d5f4e6;
+            color: #27ae60;
+        }
+        
+        .quality-good {
+            background: #fef9e7;
+            color: #f39c12;
+        }
+        
+        .quality-fair {
+            background: #fdf2e9;
+            color: #e67e22;
+        }
+        
+        .quality-poor {
+            background: #fadbd8;
+            color: #e74c3c;
+        }
+        
+        .quality-disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Market Data Ingestor Dashboard</h1>
+        <div class="status-indicator">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="connectionStatus">Connected</span>
+            <div class="refresh-info">
+                <span id="refreshIndicator">⟲</span>
+                <span id="lastUpdate">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <h3>Data Flow</h3>
+                <div class="metric-row">
+                    <span class="metric-label">Blocks Processed</span>
+                    <span class="metric-value" id="blocksProcessed">0</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Transactions Processed</span>
+                    <span class="metric-value" id="transactionsProcessed">0</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Last Block Number</span>
+                    <span class="metric-value" id="lastBlockNumber">-</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">TXN/Block</span>
+                    <span class="metric-value" id="transactionsPerBlock">0.0</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">TXN/Second</span>
+                    <span class="metric-value" id="throughputTx">0.0</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Processing Latency</span>
+                    <span class="metric-value" id="processingLatency">0 ms</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Data Processed (MB)</span>
+                    <span class="metric-value" id="dataProcessed">0.00</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Throughput (MB/s)</span>
+                    <span class="metric-value" id="throughputMb">0.00</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <h3>Pool Discovery</h3>
+                <div class="metric-row">
+                    <span class="metric-label">Pools Discovered</span>
+                    <span class="metric-value" id="poolsDiscovered">0</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Pools Accepted</span>
+                    <span class="metric-value" id="poolsAccepted">0</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Pools Rejected</span>
+                    <span class="metric-value" id="poolsRejected">0</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Success Rate</span>
+                    <span class="metric-value" id="poolSuccessRate">100%</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">States Fetched</span>
+                    <span class="metric-value" id="poolStatesFetched">0</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <h3>System Health</h3>
+                <div class="metric-row">
+                    <span class="metric-label">Memory Usage</span>
+                    <span class="metric-value" id="memoryUsage">0%</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">CPU Usage</span>
+                    <span class="metric-value" id="cpuUsage">0%</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Uptime</span>
+                    <span class="metric-value" id="uptime">0s</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Active Connections</span>
+                    <span class="metric-value" id="activeConnections">0</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <h3>Error Tracking</h3>
+                <div class="metric-row">
+                    <span class="metric-label">Connection Errors</span>
+                    <span class="metric-value" id="connectionErrors">0</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Parsing Errors</span>
+                    <span class="metric-value" id="parsingErrors">0</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Write Errors</span>
+                    <span class="metric-value" id="writeErrors">0</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Error Rate</span>
+                    <span class="metric-value" id="errorRate">0%</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Total Errors</span>
+                    <span class="metric-value" id="totalErrors">0</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <h3>Connection Status</h3>
+                <div class="metric-row">
+                    <span class="metric-label">Data Source</span>
+                    <span class="metric-value" id="dataSourceType">Unknown</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Connection Quality</span>
+                    <span class="metric-value" id="connectionQuality">
+                        <span class="connection-quality quality-excellent">Excellent</span>
+                    </span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Last Heartbeat</span>
+                    <span class="metric-value" id="lastHeartbeat">Never</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Connection Uptime</span>
+                    <span class="metric-value" id="connectionUptime">0s</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>Market Data Ingestor Dashboard v1.0.0 | Real-time monitoring for production deployment</p>
+        <p>Prometheus metrics: <a href="/api/metrics/prometheus">/api/metrics/prometheus</a> | Health check: <a href="/api/health">/api/health</a></p>
+    </div>
+
+    <script>
+        // Poll for metrics every 5 seconds
+        function updateDashboard() {
+            const refreshIndicator = document.getElementById('refreshIndicator');
+            refreshIndicator.classList.add('auto-refresh');
+            
+            fetch('/api/metrics')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+                    
+                    // Update data flow metrics
+                    const dataFlow = data.data_flow;
+                    document.getElementById('blocksProcessed').textContent = dataFlow.blocks_processed.toLocaleString();
+                    document.getElementById('transactionsProcessed').textContent = dataFlow.transactions_processed.toLocaleString();
+                    document.getElementById('lastBlockNumber').textContent = dataFlow.last_block_number ? dataFlow.last_block_number.toLocaleString() : '-';
+                    document.getElementById('transactionsPerBlock').textContent = dataFlow.transactions_per_block.toFixed(1);
+                    document.getElementById('throughputTx').textContent = dataFlow.throughput_transactions_per_sec.toFixed(1);
+                    document.getElementById('processingLatency').textContent = dataFlow.processing_latency_ms.toFixed(1) + ' ms';
+                    document.getElementById('dataProcessed').textContent = (dataFlow.bytes_processed / 1024 / 1024).toFixed(2);
+                    document.getElementById('throughputMb').textContent = dataFlow.throughput_mb_per_sec.toFixed(2);
+                    
+                    // Update pool discovery metrics
+                    const poolDiscovery = data.pool_discovery;
+                    document.getElementById('poolsDiscovered').textContent = poolDiscovery.pools_discovered.toLocaleString();
+                    document.getElementById('poolsAccepted').textContent = poolDiscovery.pools_accepted.toLocaleString();
+                    document.getElementById('poolsRejected').textContent = poolDiscovery.pools_rejected.toLocaleString();
+                    document.getElementById('poolSuccessRate').textContent = poolDiscovery.pool_fetch_success_rate.toFixed(1) + '%';
+                    document.getElementById('poolStatesFetched').textContent = poolDiscovery.pool_states_fetched.toLocaleString();
+                    
+                    // Update system health metrics
+                    const systemHealth = data.system_health;
+                    const memoryElement = document.getElementById('memoryUsage');
+                    memoryElement.textContent = systemHealth.memory_usage_percent.toFixed(1) + '%';
+                    memoryElement.className = 'metric-value ' + getHealthClass(systemHealth.memory_usage_percent, 80, 90);
+                    
+                    const cpuElement = document.getElementById('cpuUsage');
+                    cpuElement.textContent = systemHealth.cpu_usage_percent.toFixed(1) + '%';
+                    cpuElement.className = 'metric-value ' + getHealthClass(systemHealth.cpu_usage_percent, 70, 90);
+                    
+                    document.getElementById('uptime').textContent = formatDuration(systemHealth.uptime_seconds);
+                    document.getElementById('activeConnections').textContent = systemHealth.active_connections;
+                    
+                    // Update error tracking metrics
+                    const errorTracking = data.error_tracking;
+                    document.getElementById('connectionErrors').textContent = errorTracking.connection_errors.toLocaleString();
+                    document.getElementById('parsingErrors').textContent = errorTracking.parsing_errors.toLocaleString();
+                    document.getElementById('writeErrors').textContent = errorTracking.write_errors.toLocaleString();
+                    
+                    const errorRateElement = document.getElementById('errorRate');
+                    errorRateElement.textContent = errorTracking.error_rate_percent.toFixed(1) + '%';
+                    errorRateElement.className = 'metric-value ' + getErrorRateClass(errorTracking.error_rate_percent);
+                    
+                    document.getElementById('totalErrors').textContent = errorTracking.total_errors.toLocaleString();
+                    
+                    // Update connection status
+                    const connectionStatus = data.connection_status;
+                    document.getElementById('dataSourceType').textContent = connectionStatus.data_source_type;
+                    document.getElementById('connectionUptime').textContent = formatDuration(connectionStatus.connection_uptime_seconds);
+                    
+                    const qualityElement = document.getElementById('connectionQuality');
+                    const qualityClass = getQualityClass(connectionStatus.connection_quality);
+                    qualityElement.innerHTML = `<span class="connection-quality ${qualityClass}">${connectionStatus.connection_quality}</span>`;
+                    
+                    const heartbeatElement = document.getElementById('lastHeartbeat');
+                    heartbeatElement.textContent = connectionStatus.last_heartbeat ? 
+                        new Date(connectionStatus.last_heartbeat).toLocaleString() : 'Never';
+                    
+                    // Update main connection status
+                    updateConnectionStatus(connectionStatus.is_connected);
+                })
+                .catch(err => {
+                    console.error('Failed to fetch metrics:', err);
+                    updateConnectionStatus(false);
+                })
+                .finally(() => {
+                    setTimeout(() => refreshIndicator.classList.remove('auto-refresh'), 500);
+                });
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusDot = document.getElementById('statusDot');
+            const connectionStatus = document.getElementById('connectionStatus');
+            
+            if (connected) {
+                statusDot.className = 'status-dot';
+                connectionStatus.textContent = 'Connected';
+            } else {
+                statusDot.className = 'status-dot disconnected';
+                connectionStatus.textContent = 'Disconnected';
+            }
+        }
+
+        function getHealthClass(value, warningThreshold, criticalThreshold) {
+            if (value >= criticalThreshold) return 'critical';
+            if (value >= warningThreshold) return 'warning';
+            return 'good';
+        }
+
+        function getErrorRateClass(rate) {
+            if (rate >= 10) return 'critical';
+            if (rate >= 5) return 'warning';
+            return 'good';
+        }
+
+        function getQualityClass(quality) {
+            switch (quality.toLowerCase()) {
+                case 'excellent': return 'quality-excellent';
+                case 'good': return 'quality-good';
+                case 'fair': return 'quality-fair';
+                case 'poor': return 'quality-poor';
+                case 'disconnected': return 'quality-disconnected';
+                default: return 'quality-good';
+            }
+        }
+
+        function formatDuration(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const remainingSeconds = seconds % 60;
+            
+            if (hours > 0) {
+                return `${hours}h ${minutes}m ${remainingSeconds}s`;
+            } else if (minutes > 0) {
+                return `${minutes}m ${remainingSeconds}s`;
+            } else {
+                return `${remainingSeconds}s`;
+            }
+        }
+
+        // Initialize and start polling
+        updateDashboard();
+        setInterval(updateDashboard, 5000);
+    </script>
+</body>
+</html>

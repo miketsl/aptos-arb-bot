@@ -1,9 +1,9 @@
 //! Thala DEX adapter implementation for Aptos arbitrage bot.
 
+use crate::{DexAdapter, PoolState};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use common::types::{Event, MarketUpdate, TokenPair, WeightedPoolMarketUpdate};
-use dex_adapter_trait::DexAdapter;
 use serde::Deserialize;
 use serde_json::from_slice;
 
@@ -23,8 +23,23 @@ struct ThalaSwapEvent {
 }
 
 /// A stateless adapter for the Thala DEX.
-#[derive(Default)]
-pub struct ThalaAdapter;
+pub struct ThalaAdapter {
+    module_addresses: Vec<String>,
+}
+
+impl ThalaAdapter {
+    pub fn new(module_addresses: Vec<String>) -> Self {
+        Self { module_addresses }
+    }
+}
+
+impl Default for ThalaAdapter {
+    fn default() -> Self {
+        Self::new(vec![
+            "0x48271d39d0b05bd6efca2278f22277d6fcc375504f9839fd73f74ace240861af".to_string(),
+        ])
+    }
+}
 
 #[async_trait]
 impl DexAdapter for ThalaAdapter {
@@ -73,13 +88,77 @@ impl DexAdapter for ThalaAdapter {
 
         Ok(Some(market_update))
     }
+
+    fn module_addresses(&self) -> &[String] {
+        &self.module_addresses
+    }
+
+    fn extract_pool_ids(&self, event: &Event) -> Result<Vec<String>> {
+        // Try to parse as Thala swap event to extract pool ID
+        if let Ok(swap) = from_slice::<ThalaSwapEvent>(event.data.as_bytes()) {
+            Ok(vec![swap.pool_id])
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    async fn fetch_pool_state(&self, pool_id: &str) -> Result<PoolState> {
+        // Thala REST API integration
+        let client = reqwest::Client::new();
+        let url = format!("https://api.thala.fi/v1/pools/{}", pool_id);
+
+        let response = client.get(&url).send().await?;
+        let pool_data: ThalaPoolResponse = response.json().await?;
+
+        // For weighted pools, use first two tokens as primary pair
+        let (token_a, token_b) = if pool_data.tokens.len() >= 2 {
+            (pool_data.tokens[0].clone(), pool_data.tokens[1].clone())
+        } else {
+            return Err(anyhow!("Pool must have at least 2 tokens"));
+        };
+
+        let (reserve_a, reserve_b) = if pool_data.reserves.len() >= 2 {
+            (pool_data.reserves[0].clone(), pool_data.reserves[1].clone())
+        } else {
+            return Err(anyhow!("Pool must have at least 2 reserves"));
+        };
+
+        Ok(PoolState {
+            pool_id: pool_data.pool_id,
+            dex_name: self.id().to_string(),
+            token_a,
+            token_b,
+            reserve_a,
+            reserve_b,
+            fee_rate: (pool_data.fee_bps as f64 / 10000.0).to_string(),
+            block_height: pool_data.last_updated_block,
+            additional_data: serde_json::json!({
+                "pool_type": pool_data.pool_type,
+                "all_tokens": pool_data.tokens,
+                "all_reserves": pool_data.reserves,
+                "all_weights": pool_data.weights
+            }),
+        })
+    }
+}
+
+/// Response structure for Thala pool state API
+#[derive(Debug, Deserialize)]
+struct ThalaPoolResponse {
+    pool_id: String,
+    pool_type: String,
+    tokens: Vec<String>,
+    reserves: Vec<String>,
+    weights: Vec<u32>,
+    fee_bps: u32,
+    last_updated_block: u64,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use common::types::Event;
-    
+
     use rust_decimal_macros::dec;
 
     #[test]
