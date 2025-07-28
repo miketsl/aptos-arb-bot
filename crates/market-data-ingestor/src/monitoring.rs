@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sysinfo::System;
 
-use crate::recording_monitor::RecordingStats;
+use crate::recording_monitor::{RecordingStats, StageTimings};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProductionMetrics {
@@ -13,6 +13,9 @@ pub struct ProductionMetrics {
     pub error_tracking: ErrorTrackingMetrics,
     pub connection_status: ConnectionStatusMetrics,
     pub filter_effectiveness: FilterEffectivenessMetrics,
+    pub stage_timing: StageTimingMetrics,
+    pub performance_warnings: PerformanceWarningMetrics,
+    pub queue_monitoring: QueueMonitoringMetrics,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +89,15 @@ pub enum ConnectionQuality {
     Disconnected,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WarningLevel {
+    None,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilterEffectivenessMetrics {
     pub updates_received_total: u64,
@@ -98,6 +110,37 @@ pub struct FilterEffectivenessMetrics {
     pub filtered_by_dex: u64,
     pub filtered_by_liquidity: u64,
     pub filtered_by_token_pairs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageTimingMetrics {
+    pub event_extraction_time_ms: f64,
+    pub parsing_time_ms: f64,
+    pub filtering_time_ms: f64,
+    pub detector_push_time_ms: f64,
+    pub stage_timings_collected: u64,
+    pub total_stage_time_ms: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceWarningMetrics {
+    pub latency_warnings_total: u64,
+    pub threshold_violations_per_minute: f64,
+    pub current_warning_level: WarningLevel,
+    pub consecutive_violations: u64,
+    pub last_warning_timestamp: Option<SystemTime>,
+    pub warning_escalation_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueMonitoringMetrics {
+    pub queue_depth_current: usize,
+    pub queue_depth_max_observed: usize,
+    pub queue_saturation_events: u64,
+    pub queue_saturation_rate_percent: f64,
+    pub backpressure_duration_ms: f64,
+    pub queue_operations_total: u64,
+    pub average_queue_utilization_percent: f64,
 }
 
 pub struct PrometheusMetrics {
@@ -140,6 +183,25 @@ pub struct PrometheusMetrics {
     pub filter_pass_rate: Gauge,
     pub filter_processing_time: Histogram,
     pub filter_breakdown: CounterVec,
+
+    // Pipeline stage timing histograms
+    pub event_extraction_latency: Histogram,
+    pub parsing_latency: Histogram,
+    pub filtering_latency: Histogram,
+    pub detector_push_latency: Histogram,
+
+    // Performance warning metrics
+    pub latency_warnings_total: Counter,
+    pub warning_escalations_total: Counter,
+    pub consecutive_violations: Gauge,
+    pub current_warning_level: Gauge,
+
+    // Queue depth and backpressure metrics
+    pub queue_depth_current: Gauge,
+    pub queue_depth_max: Gauge,
+    pub queue_saturation_total: Counter,
+    pub backpressure_duration: Histogram,
+    pub queue_operations_total: Counter,
 }
 
 impl PrometheusMetrics {
@@ -304,6 +366,87 @@ impl PrometheusMetrics {
         )?;
         registry.register(Box::new(filter_breakdown.clone()))?;
 
+        // Pipeline stage timing histograms
+        let event_extraction_latency = Histogram::with_opts(HistogramOpts::new(
+            "mdi_event_extraction_latency_seconds",
+            "Event extraction stage latency in seconds",
+        ))?;
+        registry.register(Box::new(event_extraction_latency.clone()))?;
+
+        let parsing_latency = Histogram::with_opts(HistogramOpts::new(
+            "mdi_parsing_latency_seconds",
+            "Parsing stage latency in seconds",
+        ))?;
+        registry.register(Box::new(parsing_latency.clone()))?;
+
+        let filtering_latency = Histogram::with_opts(HistogramOpts::new(
+            "mdi_filtering_latency_seconds",
+            "Filtering stage latency in seconds",
+        ))?;
+        registry.register(Box::new(filtering_latency.clone()))?;
+
+        let detector_push_latency = Histogram::with_opts(HistogramOpts::new(
+            "mdi_detector_push_latency_seconds",
+            "Detector push stage latency in seconds",
+        ))?;
+        registry.register(Box::new(detector_push_latency.clone()))?;
+
+        // Performance warning metrics
+        let latency_warnings_total = Counter::new(
+            "mdi_latency_warnings_total",
+            "Total number of latency warnings triggered",
+        )?;
+        registry.register(Box::new(latency_warnings_total.clone()))?;
+
+        let warning_escalations_total = Counter::new(
+            "mdi_warning_escalations_total",
+            "Total number of warning escalations",
+        )?;
+        registry.register(Box::new(warning_escalations_total.clone()))?;
+
+        let consecutive_violations = Gauge::new(
+            "mdi_consecutive_violations",
+            "Current number of consecutive threshold violations",
+        )?;
+        registry.register(Box::new(consecutive_violations.clone()))?;
+
+        let current_warning_level = Gauge::new(
+            "mdi_current_warning_level",
+            "Current warning level (0=None, 1=Low, 2=Medium, 3=High, 4=Critical)",
+        )?;
+        registry.register(Box::new(current_warning_level.clone()))?;
+
+        // Queue depth and backpressure metrics
+        let queue_depth_current = Gauge::new(
+            "mdi_queue_depth_current",
+            "Current queue depth",
+        )?;
+        registry.register(Box::new(queue_depth_current.clone()))?;
+
+        let queue_depth_max = Gauge::new(
+            "mdi_queue_depth_max_observed",
+            "Maximum observed queue depth",
+        )?;
+        registry.register(Box::new(queue_depth_max.clone()))?;
+
+        let queue_saturation_total = Counter::new(
+            "mdi_queue_saturation_events_total",
+            "Total number of queue saturation events",
+        )?;
+        registry.register(Box::new(queue_saturation_total.clone()))?;
+
+        let backpressure_duration = Histogram::with_opts(HistogramOpts::new(
+            "mdi_backpressure_duration_seconds",
+            "Backpressure duration in seconds",
+        ))?;
+        registry.register(Box::new(backpressure_duration.clone()))?;
+
+        let queue_operations_total = Counter::new(
+            "mdi_queue_operations_total",
+            "Total number of queue operations",
+        )?;
+        registry.register(Box::new(queue_operations_total.clone()))?;
+
         Ok(Self {
             registry,
             transactions_processed,
@@ -337,6 +480,19 @@ impl PrometheusMetrics {
             filter_pass_rate,
             filter_processing_time,
             filter_breakdown,
+            event_extraction_latency,
+            parsing_latency,
+            filtering_latency,
+            detector_push_latency,
+            latency_warnings_total,
+            warning_escalations_total,
+            consecutive_violations,
+            current_warning_level,
+            queue_depth_current,
+            queue_depth_max,
+            queue_saturation_total,
+            backpressure_duration,
+            queue_operations_total,
         })
     }
 
@@ -461,6 +617,19 @@ impl PrometheusMetrics {
             self.active_connections.set(0.0);
         }
     }
+
+    /// Update stage timing metrics from stage timings
+    pub fn update_stage_timings(&self, stage_timings: &StageTimings) {
+        // Convert to seconds for Prometheus (as per convention)
+        self.event_extraction_latency
+            .observe(stage_timings.event_extraction_time_ms / 1000.0);
+        self.parsing_latency
+            .observe(stage_timings.parsing_time_ms / 1000.0);
+        self.filtering_latency
+            .observe(stage_timings.filtering_time_ms / 1000.0);
+        self.detector_push_latency
+            .observe(stage_timings.detector_push_time_ms / 1000.0);
+    }
 }
 
 impl Default for PrometheusMetrics {
@@ -509,6 +678,39 @@ impl MetricsCollector {
             .update_connection_status(data_source_type, is_connected, uptime);
 
         self.last_stats = Some(stats.clone());
+    }
+
+    /// Update stage timing metrics
+    pub fn update_stage_timings(&self, stage_timings: &StageTimings) {
+        self.prometheus.update_stage_timings(stage_timings);
+    }
+
+    /// Update warning metrics for threshold violations
+    pub fn update_warning_metrics(&self, warning_level: &WarningLevel, consecutive_violations: u64, escalated: bool) {
+        self.prometheus.latency_warnings_total.inc();
+        self.prometheus.consecutive_violations.set(consecutive_violations as f64);
+        self.prometheus.current_warning_level.set(warning_level_to_numeric(warning_level));
+        
+        if escalated {
+            self.prometheus.warning_escalations_total.inc();
+        }
+    }
+
+    /// Reset warning metrics when performance improves
+    pub fn reset_warning_metrics(&self) {
+        self.prometheus.consecutive_violations.set(0.0);
+        self.prometheus.current_warning_level.set(0.0); // WarningLevel::None
+    }
+
+    /// Update queue monitoring metrics
+    pub fn update_queue_metrics(&self, current_depth: usize, max_depth: usize, saturation_events: u64, backpressure_duration_ms: f64) {
+        self.prometheus.queue_depth_current.set(current_depth as f64);
+        self.prometheus.queue_depth_max.set(max_depth as f64);
+        self.prometheus.queue_saturation_total.inc_by(saturation_events as f64);
+        if backpressure_duration_ms > 0.0 {
+            self.prometheus.backpressure_duration.observe(backpressure_duration_ms / 1000.0);
+        }
+        self.prometheus.queue_operations_total.inc();
     }
 
     pub fn get_production_metrics(
@@ -628,6 +830,46 @@ impl MetricsCollector {
                 filtered_by_liquidity: stats.filtered_by_liquidity,
                 filtered_by_token_pairs: stats.filtered_by_token_pairs,
             },
+            stage_timing: StageTimingMetrics {
+                event_extraction_time_ms: stats.event_extraction_time_ms,
+                parsing_time_ms: stats.parsing_time_ms,
+                filtering_time_ms: stats.filtering_time_ms,
+                detector_push_time_ms: stats.detector_push_time_ms,
+                stage_timings_collected: stats.stage_timings_collected,
+                total_stage_time_ms: stats.event_extraction_time_ms
+                    + stats.parsing_time_ms
+                    + stats.filtering_time_ms
+                    + stats.detector_push_time_ms,
+            },
+            performance_warnings: PerformanceWarningMetrics {
+                latency_warnings_total: stats.threshold_violations.total_count,
+                threshold_violations_per_minute: if uptime > 0 {
+                    (stats.threshold_violations.total_count as f64 / uptime as f64) * 60.0
+                } else {
+                    0.0
+                },
+                consecutive_violations: stats.threshold_violations.consecutive_count,
+                last_warning_timestamp: stats.threshold_violations.last_violation_time,
+                warning_escalation_count: stats.threshold_violations.escalation_count,
+                current_warning_level: stats.threshold_violations.current_level,
+            },
+            queue_monitoring: QueueMonitoringMetrics {
+                queue_depth_current: stats.queue_depth_current,
+                queue_depth_max_observed: stats.queue_depth_max_observed,
+                queue_saturation_events: stats.queue_saturation_events,
+                queue_saturation_rate_percent: if stats.queue_operations_total > 0 {
+                    (stats.queue_saturation_events as f64 / stats.queue_operations_total as f64) * 100.0
+                } else {
+                    0.0
+                },
+                backpressure_duration_ms: stats.backpressure_duration_ms,
+                queue_operations_total: stats.queue_operations_total,
+                average_queue_utilization_percent: if stats.queue_depth_max_observed > 0 {
+                    (stats.queue_depth_current as f64 / stats.queue_depth_max_observed as f64) * 100.0
+                } else {
+                    0.0
+                },
+            },
         }
     }
 }
@@ -662,6 +904,17 @@ pub fn timestamp_to_rfc3339(timestamp: Option<SystemTime>) -> String {
                 .unwrap_or_else(|| "invalid".to_string())
         })
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Convert WarningLevel to numeric value for Prometheus metrics
+fn warning_level_to_numeric(level: &WarningLevel) -> f64 {
+    match level {
+        WarningLevel::None => 0.0,
+        WarningLevel::Low => 1.0,
+        WarningLevel::Medium => 2.0,
+        WarningLevel::High => 3.0,
+        WarningLevel::Critical => 4.0,
+    }
 }
 
 #[cfg(test)]

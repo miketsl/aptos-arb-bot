@@ -112,9 +112,11 @@ fn main() -> anyhow::Result<()> {
         let mut file_manager = setup_file_manager(&args, &recording_config)?;
 
         // Setup monitoring
-        let monitor = RecordingMonitor::new(recording_config.monitoring.clone());
+        let mut monitor = RecordingMonitor::new(recording_config.monitoring.clone());
         let stats_handle = monitor.stats_handle();
-        monitor.start_monitoring().await;
+        if let Err(e) = monitor.start_monitoring().await {
+            warn!("Failed to start monitoring: {}", e);
+        }
 
         // Setup progress reporter
         let mut progress_reporter = ProgressReporter::new(
@@ -323,12 +325,15 @@ async fn recording_loop(
 
     loop {
         // Check if we should continue recording
-        if !monitor
+        let should_continue = monitor
             .should_continue(
                 config.recording.max_batches,
                 config.recording.max_duration_seconds,
             )
             .await
+            .map_err(|e| anyhow::anyhow!("Error checking should_continue: {}", e))?;
+        
+        if !should_continue
         {
             break;
         }
@@ -392,7 +397,9 @@ async fn recording_loop(
         }
 
         // Report progress if needed
-        progress_reporter.maybe_report_progress().await;
+        if let Err(e) = progress_reporter.maybe_report_progress().await {
+            warn!("Failed to report progress: {}", e);
+        }
     }
 
     Ok(())

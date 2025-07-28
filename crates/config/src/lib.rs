@@ -67,6 +67,14 @@ pub struct PerformanceConfig {
     pub metrics_enabled: bool,
     #[serde(default = "default_metrics_port")]
     pub metrics_port: u16,
+    
+    // Warning system configuration
+    #[serde(default = "default_warning_escalation_count")]
+    pub warning_escalation_count: u32,
+    #[serde(default = "default_critical_latency_multiplier")]
+    pub critical_latency_multiplier: f64,
+    #[serde(default = "default_warning_log_interval_seconds")]
+    pub warning_log_interval_seconds: u64,
 }
 
 /// DEX adapter configuration - aligned with existing DexConfig
@@ -141,6 +149,19 @@ fn default_max_concurrent_fetches() -> usize {
 }
 fn default_retry_attempts() -> u32 {
     3
+}
+
+// Warning system defaults
+fn default_warning_escalation_count() -> u32 {
+    3
+}
+
+fn default_critical_latency_multiplier() -> f64 {
+    2.0
+}
+
+fn default_warning_log_interval_seconds() -> u64 {
+    60
 }
 
 // A serializable representation of the transaction stream config from the YAML.
@@ -400,6 +421,9 @@ pub fn default_ingestor_config() -> IngestorConfig {
             latency_warning_threshold_ms: default_latency_warning_threshold_ms(),
             metrics_enabled: default_metrics_enabled(),
             metrics_port: default_metrics_port(),
+            warning_escalation_count: default_warning_escalation_count(),
+            critical_latency_multiplier: default_critical_latency_multiplier(),
+            warning_log_interval_seconds: default_warning_log_interval_seconds(),
         },
         adapters: vec![],
         pool_state: PoolStateConfig {

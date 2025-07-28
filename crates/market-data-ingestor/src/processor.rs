@@ -1,7 +1,8 @@
 use crate::data_source::{DataSource as SourceTrait, FileSource, GrpcSource};
 use crate::ingestor_config::IndexerProcessorConfig;
 use crate::monitoring::MetricsCollector;
-use crate::recording_monitor::RecordingStats;
+use crate::recording_monitor::{RecordingStats, StageTimings};
+use crate::monitoring::WarningLevel;
 use crate::steps::{DetectorPushStep, EventExtractorStep, FilterStep, Parser};
 use crate::{http_server, TimestampedEvent};
 use anyhow::Result;
@@ -24,6 +25,10 @@ pub struct MarketDataIngestorProcessor {
     live_stats: RecordingStats,
     metrics_collector: Arc<RwLock<MetricsCollector>>,
     start_time: Instant,
+    
+    // Warning system state
+    consecutive_violations: u64,
+    last_warning_log_time: Option<Instant>,
 }
 
 impl MarketDataIngestorProcessor {
@@ -44,6 +49,8 @@ impl MarketDataIngestorProcessor {
             live_stats: RecordingStats::new(),
             metrics_collector,
             start_time: Instant::now(),
+            consecutive_violations: 0,
+            last_warning_log_time: None,
         })
     }
 
@@ -126,13 +133,38 @@ impl MarketDataIngestorProcessor {
                     updates_received_total: 0,
                     updates_after_filtering: 0,
                     updates_filtered_out: 0,
-                    filter_pass_rate_percent: 100.0,
+                    filter_pass_rate_percent: 0.0,
                     filter_processing_time_ms: 0.0,
                     filters_applied_total: 0,
                     filtered_by_token: 0,
                     filtered_by_dex: 0,
                     filtered_by_liquidity: 0,
                     filtered_by_token_pairs: 0,
+                },
+                stage_timing: crate::monitoring::StageTimingMetrics {
+                    event_extraction_time_ms: 0.0,
+                    parsing_time_ms: 0.0,
+                    filtering_time_ms: 0.0,
+                    detector_push_time_ms: 0.0,
+                    stage_timings_collected: 0,
+                    total_stage_time_ms: 0.0,
+                },
+                performance_warnings: crate::monitoring::PerformanceWarningMetrics {
+                    latency_warnings_total: 0,
+                    threshold_violations_per_minute: 0.0,
+                    current_warning_level: WarningLevel::None,
+                    consecutive_violations: 0,
+                    last_warning_timestamp: None,
+                    warning_escalation_count: 0,
+                },
+                queue_monitoring: crate::monitoring::QueueMonitoringMetrics {
+                    queue_depth_current: 0,
+                    queue_depth_max_observed: 0,
+                    queue_saturation_events: 0,
+                    queue_saturation_rate_percent: 0.0,
+                    backpressure_duration_ms: 0.0,
+                    queue_operations_total: 0,
+                    average_queue_utilization_percent: 0.0,
                 },
             }
         }
@@ -209,6 +241,9 @@ impl MarketDataIngestorProcessor {
 
         self.live_stats.last_batch_time = Some(SystemTime::now());
 
+        // Performance warning threshold checking
+        self.check_performance_thresholds(current_latency_ms);
+
         let data_source_type = match &self.config.ingestor_config.data_source {
             DataSourceConfig::Grpc { .. } => "grpc",
             DataSourceConfig::File { .. } => "file",
@@ -216,6 +251,73 @@ impl MarketDataIngestorProcessor {
 
         if let Ok(mut collector) = self.metrics_collector.write() {
             collector.update_metrics(&self.live_stats, data_source_type, is_connected);
+        }
+    }
+
+    /// Check performance thresholds and trigger warnings with rate limiting and escalation
+    fn check_performance_thresholds(&mut self, current_latency_ms: f64) {
+        let performance_config = &self.config.ingestor_config.performance;
+        let threshold_ms = performance_config.latency_warning_threshold_ms as f64;
+        let critical_multiplier = performance_config.critical_latency_multiplier;
+        let log_interval = Duration::from_secs(performance_config.warning_log_interval_seconds);
+        
+        if current_latency_ms > threshold_ms {
+            // Threshold violation detected
+            self.consecutive_violations += 1;
+            
+            // Calculate warning level based on current state
+            let warning_level = self.live_stats.calculate_warning_level(threshold_ms, critical_multiplier);
+            
+            // Record warning in stats
+            self.live_stats.record_performance_warning(warning_level.clone(), threshold_ms);
+            
+            // Update Prometheus warning metrics
+            if let Ok(collector) = self.metrics_collector.read() {
+                let escalated = self.consecutive_violations > performance_config.warning_escalation_count as u64;
+                collector.update_warning_metrics(&warning_level, self.consecutive_violations, escalated);
+            }
+            
+            // Rate-limited structured logging
+            let now = Instant::now();
+            let should_log = self.last_warning_log_time
+                .map_or(true, |last| now.duration_since(last) >= log_interval);
+                
+            if should_log {
+                self.last_warning_log_time = Some(now);
+                
+                warn!(
+                    latency_ms = current_latency_ms,
+                    threshold_ms = threshold_ms,
+                    consecutive_violations = self.consecutive_violations,
+                    warning_level = ?warning_level,
+                    stage_breakdown = ?format!(
+                        "extraction={:.2}ms, parsing={:.2}ms, filtering={:.2}ms, detector_push={:.2}ms",
+                        self.live_stats.event_extraction_time_ms,
+                        self.live_stats.parsing_time_ms,
+                        self.live_stats.filtering_time_ms,
+                        self.live_stats.detector_push_time_ms
+                    ),
+                    "Performance threshold violation detected"
+                );
+            }
+        } else {
+            // Performance improved - reset violation tracking
+            if self.consecutive_violations > 0 {
+                info!(
+                    latency_ms = current_latency_ms,
+                    threshold_ms = threshold_ms,
+                    previous_violations = self.consecutive_violations,
+                    "Performance improved - resetting violation tracking"
+                );
+                
+                self.consecutive_violations = 0;
+                self.live_stats.reset_violation_tracking();
+                
+                // Update Prometheus metrics
+                if let Ok(collector) = self.metrics_collector.read() {
+                    collector.reset_warning_metrics();
+                }
+            }
         }
     }
 
@@ -316,20 +418,38 @@ impl MarketDataIngestorProcessor {
                             // Use block height for block messages if available, otherwise use version
                             let block_number = timestamped_event.raw_event.metadata.block_height.unwrap_or(version);
 
-                            // Emit BlockStart before processing this transaction
-                            detector_push.push(DetectorMessage::BlockStart {
+                            // Emit BlockStart before processing this transaction with queue monitoring
+                            let block_start_metrics = detector_push.push_with_metrics(DetectorMessage::BlockStart {
                                 block_number,
                                 timestamp: Utc::now(),
                             }).await?;
+                            
+                            // Record queue metrics for BlockStart
+                            if let Err(e) = self.live_stats.record_queue_metrics(
+                                block_start_metrics.queue_depth_before,
+                                block_start_metrics.operation_time_ms,
+                                block_start_metrics.was_blocked,
+                            ) {
+                                warn!("Failed to record queue metrics: {}", e);
+                            }
 
-                            // Extract relevant events
+                            // Extract relevant events with timing
+                            let extraction_start = Instant::now();
                             match event_extractor.process_transaction(transaction.clone()).await {
                                 Ok(events) if !events.is_empty() => {
-                                    // Parse events into market updates
+                                    let extraction_time = extraction_start.elapsed().as_micros() as f64 / 1000.0;
+
+                                    // Parse events into market updates with timing
+                                    let parsing_start = Instant::now();
                                     match self.parser.process_events(&events) {
                                          Ok(mut updates) if !updates.is_empty() => {
+                                            let parsing_time = parsing_start.elapsed().as_micros() as f64 / 1000.0;
+
                                             // Filter in-place to drop unwanted pools with metrics collection
+                                            let filtering_start = Instant::now();
                                             let filter_metrics = self.filter_step.apply_with_metrics(&mut updates);
+                                            let filtering_time = filtering_start.elapsed().as_micros() as f64 / 1000.0;
+                                            
                                             self.live_stats.record_filter_applied(&filter_metrics);
 
                                             // Log significant filtering events
@@ -346,32 +466,106 @@ impl MarketDataIngestorProcessor {
                                                 );
                                             }
 
+                                            let mut detector_push_time = 0.0;
                                             if !updates.is_empty() {
-                                                // Push updates to detector
+                                                // Push updates to detector with timing and queue monitoring
+                                                let detector_push_start = Instant::now();
+                                                let mut total_queue_time = 0.0;
+                                                let mut max_queue_depth = 0;
+                                                let mut any_blocked = false;
+                                                
                                                 for update in updates {
-                                                    if let Err(e) = detector_push.push(DetectorMessage::MarketUpdate(update)).await {
-                                                        error!(version = version, error = %e, "Failed to send MarketUpdate message");
-                                                        self.live_stats.write_errors += 1;
+                                                    match detector_push.push_with_metrics(DetectorMessage::MarketUpdate(update)).await {
+                                                        Ok(queue_metrics) => {
+                                                            total_queue_time += queue_metrics.operation_time_ms;
+                                                            max_queue_depth = max_queue_depth.max(queue_metrics.queue_depth_before);
+                                                            any_blocked = any_blocked || queue_metrics.was_blocked;
+                                                            
+                                                            // Record individual queue operation metrics
+                                                            if let Err(e) = self.live_stats.record_queue_metrics(
+                                                                queue_metrics.queue_depth_before,
+                                                                queue_metrics.operation_time_ms,
+                                                                queue_metrics.was_blocked,
+                                                            ) {
+                                                                warn!("Failed to record queue metrics: {}", e);
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            error!(version = version, error = %e, "Failed to send MarketUpdate message");
+                                                            self.live_stats.write_errors += 1;
+                                                        }
                                                     }
                                                 }
+                                                detector_push_time = detector_push_start.elapsed().as_micros() as f64 / 1000.0;
+                                                
+                                                // Update metrics collector with queue statistics
+                                                if let Ok(collector) = self.metrics_collector.read() {
+                                                    collector.update_queue_metrics(
+                                                        self.live_stats.queue_depth_current,
+                                                        self.live_stats.queue_depth_max_observed,
+                                                        if any_blocked { 1 } else { 0 },
+                                                        total_queue_time,
+                                                    );
+                                                }
+                                            }
+
+                                            // Record stage timings
+                                            let stage_timings = StageTimings::new(
+                                                extraction_time,
+                                                parsing_time,
+                                                filtering_time,
+                                                detector_push_time,
+                                            );
+                                            self.live_stats.record_stage_timing(&stage_timings);
+
+                                            // Update Prometheus stage metrics
+                                            if let Ok(collector) = self.metrics_collector.read() {
+                                                collector.update_stage_timings(&stage_timings);
                                             }
                                         }
-                                        Ok(_) => {} // No updates generated
+                                        Ok(_) => {
+                                            // No updates generated - still record extraction and parsing times
+                                            let parsing_time = parsing_start.elapsed().as_micros() as f64 / 1000.0;
+                                            let stage_timings = StageTimings::new(extraction_time, parsing_time, 0.0, 0.0);
+                                            self.live_stats.record_stage_timing(&stage_timings);
+                                        }
                                         Err(e) => {
                                             error!(version = version, error = %e, "Failed to parse events");
                                             self.live_stats.parsing_errors += 1;
+                                            // Record partial timing for failed parsing
+                                            let parsing_time = parsing_start.elapsed().as_micros() as f64 / 1000.0;
+                                            let stage_timings = StageTimings::new(extraction_time, parsing_time, 0.0, 0.0);
+                                            self.live_stats.record_stage_timing(&stage_timings);
                                         }
                                     }
                                 }
-                                Ok(_) => {} // No relevant events
+                                Ok(_) => {
+                                    // No relevant events - record extraction time only
+                                    let extraction_time = extraction_start.elapsed().as_micros() as f64 / 1000.0;
+                                    let stage_timings = StageTimings::new(extraction_time, 0.0, 0.0, 0.0);
+                                    self.live_stats.record_stage_timing(&stage_timings);
+                                }
                                 Err(e) => {
                                     error!(version = version, error = %e, "Failed to extract events");
                                     self.live_stats.parsing_errors += 1;
+                                    // Record failed extraction time
+                                    let extraction_time = extraction_start.elapsed().as_micros() as f64 / 1000.0;
+                                    let stage_timings = StageTimings::new(extraction_time, 0.0, 0.0, 0.0);
+                                    self.live_stats.record_stage_timing(&stage_timings);
                                 }
                             }
 
-                            // Emit BlockEnd after processing this transaction
-                            detector_push.push(DetectorMessage::BlockEnd { block_number }).await?;
+                            // Emit BlockEnd after processing this transaction with queue monitoring  
+                            let block_end_metrics = detector_push.push_with_metrics(DetectorMessage::BlockEnd { block_number }).await?;
+                            
+                            // Record queue metrics for BlockEnd
+                            if let Err(e) = self.live_stats.record_queue_metrics(
+                                block_end_metrics.queue_depth_before,
+                                block_end_metrics.operation_time_ms,
+                                block_end_metrics.was_blocked,
+                            ) {
+                                warn!("Failed to record queue metrics: {}", e);
+                            }
 
                             // Update metrics with processing time and connection status
                             let processing_time = processing_start.elapsed();
