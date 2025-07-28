@@ -17,17 +17,17 @@ fn test_warning_level_transitions() {
     assert_eq!(level, WarningLevel::Low); // First violation
     
     // Add consecutive violations
-    stats.consecutive_violations = 1;
+    stats.threshold_violations.consecutive_count = 5;
     let level = stats.calculate_warning_level(100.0, 2.0);
     assert_eq!(level, WarningLevel::Low); // Still low with few violations
     
-    stats.consecutive_violations = 3;
+    stats.threshold_violations.consecutive_count = 3;
     let level = stats.calculate_warning_level(100.0, 2.0);
     assert_eq!(level, WarningLevel::Medium); // Escalated to medium
     
     // Increase latency further
     stats.record_batch_processed(180, 10, 1024); // Higher latency
-    stats.consecutive_violations = 5;
+    stats.threshold_violations.consecutive_count = 5;
     let level = stats.calculate_warning_level(100.0, 2.0);
     assert_eq!(level, WarningLevel::High); // High warning
     
@@ -43,24 +43,24 @@ fn test_warning_escalation_logic() {
     let mut stats = RecordingStats::new();
     
     // Test escalation counting
-    assert_eq!(stats.warning_escalation_count, 0);
+    assert_eq!(stats.threshold_violations.escalation_count, 0);
     
     // First warning (no escalation)
-    stats.record_performance_warning(WarningLevel::Low, 1);
-    assert_eq!(stats.warning_escalation_count, 0);
+    stats.record_performance_warning(WarningLevel::Low, 1.0);
+    assert_eq!(stats.threshold_violations.escalation_count, 0);
     
     // Second consecutive warning (escalation)
-    stats.record_performance_warning(WarningLevel::Medium, 2);
-    assert_eq!(stats.warning_escalation_count, 1);
+    stats.record_performance_warning(WarningLevel::Medium, 2.0);
+    assert_eq!(stats.threshold_violations.escalation_count, 1);
     
     // Third consecutive warning (another escalation)
-    stats.record_performance_warning(WarningLevel::High, 3);
-    assert_eq!(stats.warning_escalation_count, 2);
+    stats.record_performance_warning(WarningLevel::High, 3.0);
+    assert_eq!(stats.threshold_violations.escalation_count, 2);
     
     // Verify warning count
-    assert_eq!(stats.latency_warnings_total, 3);
-    assert_eq!(stats.consecutive_violations, 3);
-    assert!(stats.last_warning_timestamp.is_some());
+    assert_eq!(stats.threshold_violations.total_count, 3);
+    assert_eq!(stats.threshold_violations.consecutive_count, 3);
+    assert!(stats.threshold_violations.last_violation_time.is_some());
 }
 
 #[test]
@@ -122,17 +122,17 @@ fn test_warning_reset_behavior() {
     let mut stats = RecordingStats::new();
     
     // Build up violations
-    stats.consecutive_violations = 5;
-    stats.latency_warnings_total = 10;
-    stats.warning_escalation_count = 3;
+    stats.threshold_violations.consecutive_count = 5;
+    stats.threshold_violations.total_count = 10;
+    stats.threshold_violations.escalation_count = 3;
     
     // Reset violations
     stats.reset_violation_tracking();
     
     // Verify only consecutive violations are reset
-    assert_eq!(stats.consecutive_violations, 0);
-    assert_eq!(stats.latency_warnings_total, 10); // Preserved
-    assert_eq!(stats.warning_escalation_count, 3); // Preserved
+    assert_eq!(stats.threshold_violations.consecutive_count, 0);
+    assert_eq!(stats.threshold_violations.total_count, 10); // Preserved
+    assert_eq!(stats.threshold_violations.escalation_count, 3); // Preserved
 }
 
 #[tokio::test]

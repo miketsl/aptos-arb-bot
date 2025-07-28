@@ -82,7 +82,7 @@ fn test_warning_level_calculation() {
     assert_eq!(level, WarningLevel::Low);
     
     // Test escalation with consecutive violations
-    stats.consecutive_violations = 3;
+    stats.threshold_violations.consecutive_count = 3;
     let level = stats.calculate_warning_level(100.0, 2.0);
     assert_eq!(level, WarningLevel::Medium);
     
@@ -99,15 +99,15 @@ fn test_warning_tracking() {
     let mut stats = RecordingStats::new();
     
     // Test warning recording
-    stats.record_performance_warning(WarningLevel::Medium, 3);
-    assert_eq!(stats.latency_warnings_total, 1);
-    assert_eq!(stats.consecutive_violations, 3);
-    assert_eq!(stats.warning_escalation_count, 1); // Escalation on > 1 violation
-    assert!(stats.last_warning_timestamp.is_some());
+    stats.record_performance_warning(WarningLevel::Medium, 3.0);
+    assert_eq!(stats.threshold_violations.total_count, 1);
+    assert_eq!(stats.threshold_violations.consecutive_count, 3);
+    assert_eq!(stats.threshold_violations.escalation_count, 1); // Escalation on > 1 violation
+    assert!(stats.threshold_violations.last_violation_time.is_some());
     
     // Test reset
     stats.reset_violation_tracking();
-    assert_eq!(stats.consecutive_violations, 0);
+    assert_eq!(stats.threshold_violations.consecutive_count, 0);
 }
 
 #[tokio::test]
