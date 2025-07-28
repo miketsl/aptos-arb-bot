@@ -1,6 +1,86 @@
 use common::types::MarketUpdate;
 use common::types::TokenPair;
 use config_lib::{FilterConfig, IngestorFilterConfig};
+use serde::{Deserialize, Serialize};
+use std::time::Instant;
+
+/// Categorizes why market updates were filtered out.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FilterReasons {
+    pub filtered_by_token: u64,
+    pub filtered_by_dex: u64,
+    pub filtered_by_liquidity: u64,
+    pub filtered_by_token_pairs: u64,
+}
+
+impl FilterReasons {
+    pub fn new() -> Self {
+        Self {
+            filtered_by_token: 0,
+            filtered_by_dex: 0,
+            filtered_by_liquidity: 0,
+            filtered_by_token_pairs: 0,
+        }
+    }
+
+    pub fn add_token_filter(&mut self) {
+        self.filtered_by_token += 1;
+    }
+
+    pub fn add_token_pairs_filter(&mut self) {
+        self.filtered_by_token_pairs += 1;
+    }
+
+    pub fn add_dex_filter(&mut self) {
+        self.filtered_by_dex += 1;
+    }
+
+    pub fn add_liquidity_filter(&mut self) {
+        self.filtered_by_liquidity += 1;
+    }
+}
+
+impl Default for FilterReasons {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Detailed metrics for a single filter application.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilterMetrics {
+    pub updates_received_total: u64,
+    pub updates_after_filtering: u64,
+    pub updates_filtered_out: u64,
+    pub filter_pass_rate_percent: f64,
+    pub filter_processing_time_ms: f64,
+    pub filter_reasons: FilterReasons,
+}
+
+impl FilterMetrics {
+    pub fn new(
+        updates_received: u64,
+        updates_after: u64,
+        processing_time_ms: f64,
+        filter_reasons: FilterReasons,
+    ) -> Self {
+        let updates_filtered_out = updates_received.saturating_sub(updates_after);
+        let filter_pass_rate_percent = if updates_received > 0 {
+            (updates_after as f64 / updates_received as f64) * 100.0
+        } else {
+            100.0
+        };
+
+        Self {
+            updates_received_total: updates_received,
+            updates_after_filtering: updates_after,
+            updates_filtered_out,
+            filter_pass_rate_percent,
+            filter_processing_time_ms: processing_time_ms,
+            filter_reasons,
+        }
+    }
+}
 
 /// Filter criteria for selecting which CLMM pools to ingest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +156,53 @@ impl FilterStep {
             MarketUpdate::StableSwap(m) => self.filter.matches(&m.token_pair),
             MarketUpdate::WeightedPool(m) => self.filter.matches(&m.token_pair),
         });
+    }
+
+    /// Apply filtering with detailed metrics collection.
+    /// Returns metrics about the filtering operation including processing time and filter breakdown.
+    pub fn apply_with_metrics(&self, updates: &mut Vec<MarketUpdate>) -> FilterMetrics {
+        let start_time = Instant::now();
+        let updates_received = updates.len() as u64;
+        let mut filter_reasons = FilterReasons::new();
+
+        // Track which updates are filtered and why
+        updates.retain(|u| {
+            let token_pair = match u {
+                MarketUpdate::Clmm(m) => &m.token_pair,
+                MarketUpdate::ConstantProduct(m) => &m.token_pair,
+                MarketUpdate::StableSwap(m) => &m.token_pair,
+                MarketUpdate::WeightedPool(m) => &m.token_pair,
+            };
+
+            let matches = self.filter.matches(token_pair);
+
+            if !matches {
+                // Categorize the filter reason based on filter type
+                match &self.filter {
+                    PoolFilter::All => {
+                        // Should not happen since All matches everything
+                    }
+                    PoolFilter::Token(_) => {
+                        filter_reasons.add_token_filter();
+                    }
+                    PoolFilter::TokenPairs(_) => {
+                        filter_reasons.add_token_pairs_filter();
+                    }
+                }
+            }
+
+            matches
+        });
+
+        let processing_time_ms = start_time.elapsed().as_micros() as f64 / 1000.0;
+        let updates_after = updates.len() as u64;
+
+        FilterMetrics::new(
+            updates_received,
+            updates_after,
+            processing_time_ms,
+            filter_reasons,
+        )
     }
 }
 

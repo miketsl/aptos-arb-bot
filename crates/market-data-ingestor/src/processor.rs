@@ -122,6 +122,18 @@ impl MarketDataIngestorProcessor {
                     last_heartbeat: None,
                     connection_quality: crate::monitoring::ConnectionQuality::Disconnected,
                 },
+                filter_effectiveness: crate::monitoring::FilterEffectivenessMetrics {
+                    updates_received_total: 0,
+                    updates_after_filtering: 0,
+                    updates_filtered_out: 0,
+                    filter_pass_rate_percent: 100.0,
+                    filter_processing_time_ms: 0.0,
+                    filters_applied_total: 0,
+                    filtered_by_token: 0,
+                    filtered_by_dex: 0,
+                    filtered_by_liquidity: 0,
+                    filtered_by_token_pairs: 0,
+                },
             }
         }
     }
@@ -315,9 +327,25 @@ impl MarketDataIngestorProcessor {
                                 Ok(events) if !events.is_empty() => {
                                     // Parse events into market updates
                                     match self.parser.process_events(&events) {
-                                        Ok(mut updates) if !updates.is_empty() => {
-                                            // Filter in-place to drop unwanted pools
-                                            self.filter_step.apply(&mut updates);
+                                         Ok(mut updates) if !updates.is_empty() => {
+                                            // Filter in-place to drop unwanted pools with metrics collection
+                                            let filter_metrics = self.filter_step.apply_with_metrics(&mut updates);
+                                            self.live_stats.record_filter_applied(&filter_metrics);
+
+                                            // Log significant filtering events
+                                            if filter_metrics.updates_filtered_out > 0 {
+                                                info!(
+                                                    version = version,
+                                                    received = filter_metrics.updates_received_total,
+                                                    passed = filter_metrics.updates_after_filtering,
+                                                    filtered = filter_metrics.updates_filtered_out,
+                                                    pass_rate = filter_metrics.filter_pass_rate_percent,
+                                                    processing_time_ms = filter_metrics.filter_processing_time_ms,
+                                                    "Filter applied with {} updates filtered out",
+                                                    filter_metrics.updates_filtered_out
+                                                );
+                                            }
+
                                             if !updates.is_empty() {
                                                 // Push updates to detector
                                                 for update in updates {
