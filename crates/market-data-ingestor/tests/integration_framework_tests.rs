@@ -768,7 +768,7 @@ async fn test_monitoring_integration() {
     assert!(formatted_stats.contains("pools_discovered"));
 
     // Test monitoring state
-    let should_continue = fixture.recording_monitor.should_continue(0, 0).await;
+    let should_continue = fixture.recording_monitor.should_continue(0, 0).await.unwrap();
     assert!(should_continue, "Monitoring should continue by default");
 
     // Test error threshold (if implemented)
