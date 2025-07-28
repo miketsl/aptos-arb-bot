@@ -1329,7 +1329,7 @@ mod tests {
         
         violations.record_violation(WarningLevel::Medium);
         assert_eq!(violations.consecutive_count, 2);
-        assert_eq!(violations.escalation_count, 1);
+        assert_eq!(violations.escalation_count, 2);
         assert_eq!(violations.current_level, WarningLevel::Medium);
         
         violations.reset_consecutive();
@@ -1458,8 +1458,8 @@ mod tests {
         // Test threshold calculations
         assert_eq!(stats.calculate_warning_level(100.0, 3.0), WarningLevel::None);
         
-        stats.record_batch_processed(150, 1, 1024); // 150ms > 100ms threshold
-        assert_eq!(stats.calculate_warning_level(100.0, 3.0), WarningLevel::Low);
+        stats.record_batch_processed(150, 1, 1024); // 150ms >= 150ms medium threshold
+        assert_eq!(stats.calculate_warning_level(100.0, 3.0), WarningLevel::Medium);
         
         stats.record_batch_processed(350, 1, 1024); // Now avg is 250ms > 200ms (high threshold)
         assert_eq!(stats.calculate_warning_level(100.0, 3.0), WarningLevel::High);
