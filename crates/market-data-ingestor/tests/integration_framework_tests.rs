@@ -979,3 +979,267 @@ struct WorkflowStats {
     errors: usize,
 }
 use std::sync::Mutex;
+
+/// End-to-end filter metrics integration tests
+#[tokio::test]
+async fn test_filter_metrics_end_to_end() {
+    use common::types::{ClmmMarketUpdate, MarketUpdate, TokenPair};
+    use config_lib::FilterConfig;
+    use market_data_ingestor::steps::filter::FilterStep;
+    use std::collections::HashMap;
+
+    // Create test market updates
+    let mut updates = vec![
+        MarketUpdate::Clmm(ClmmMarketUpdate {
+            pool_address: "pool_1".to_string(),
+            dex_name: "test_dex".to_string(),
+            token_pair: TokenPair {
+                token0: "USDT".to_string(),
+                token1: "USDC".to_string(),
+            },
+            sqrt_price: 100,
+            liquidity: 1000,
+            tick: 0,
+            fee_bps: 30,
+            tick_map: HashMap::new(),
+        }),
+        MarketUpdate::Clmm(ClmmMarketUpdate {
+            pool_address: "pool_2".to_string(),
+            dex_name: "test_dex".to_string(),
+            token_pair: TokenPair {
+                token0: "BTC".to_string(),
+                token1: "ETH".to_string(),
+            },
+            sqrt_price: 200,
+            liquidity: 2000,
+            tick: 10,
+            fee_bps: 30,
+            tick_map: HashMap::new(),
+        }),
+    ];
+
+    // Test token filter
+    let token_filter = FilterStep::new(&FilterConfig::Token {
+        token: "USDT".to_string(),
+    });
+
+    let original_len = updates.len();
+    let metrics = token_filter.apply_with_metrics(&mut updates);
+
+    // Verify metrics accuracy
+    assert_eq!(metrics.updates_received_total, original_len as u64);
+    assert_eq!(metrics.updates_after_filtering, 1);
+    assert_eq!(metrics.updates_filtered_out, 1);
+    assert_eq!(metrics.filter_pass_rate_percent, 50.0);
+    assert_eq!(metrics.filter_reasons.filtered_by_token, 1);
+    assert!(metrics.filter_processing_time_ms >= 0.0);
+    assert!(metrics.filter_processing_time_ms < 1.0); // Should be very fast
+
+    // Verify filtering worked correctly
+    assert_eq!(updates.len(), 1);
+    if let MarketUpdate::Clmm(ref update) = updates[0] {
+        assert_eq!(update.token_pair.token0, "USDT");
+    } else {
+        panic!("Expected CLMM update");
+    }
+}
+
+#[tokio::test]
+async fn test_filter_metrics_prometheus_exposure() {
+    use market_data_ingestor::monitoring::MetricsCollector;
+    use market_data_ingestor::recording_monitor::RecordingStats;
+    use market_data_ingestor::steps::filter::{FilterMetrics, FilterReasons};
+
+    // Create metrics collector
+    let mut collector = MetricsCollector::new().expect("Failed to create metrics collector");
+
+    // Create sample filter metrics
+    let filter_metrics = FilterMetrics {
+        updates_received_total: 100,
+        updates_after_filtering: 75,
+        updates_filtered_out: 25,
+        filter_pass_rate_percent: 75.0,
+        filter_processing_time_ms: 0.5,
+        filter_reasons: FilterReasons {
+            filtered_by_token: 15,
+            filtered_by_dex: 0,
+            filtered_by_liquidity: 0,
+            filtered_by_token_pairs: 10,
+        },
+    };
+
+    // Create recording stats and add filter metrics
+    let mut stats = RecordingStats::new();
+    stats.record_filter_applied(&filter_metrics);
+
+    // Update metrics collector
+    collector.update_metrics(&stats, "test", true);
+
+    // Verify Prometheus metrics are exposed
+    let registry = collector.registry();
+    let metric_families = registry.gather();
+
+    let filter_metric_names = [
+        "mdi_filter_updates_received_total",
+        "mdi_filter_updates_passed_total",
+        "mdi_filter_updates_filtered_total",
+        "mdi_filter_pass_rate_percent",
+        "mdi_filter_processing_time_seconds",
+        "mdi_filter_breakdown_total",
+    ];
+
+    for expected_name in &filter_metric_names {
+        let found = metric_families
+            .iter()
+            .any(|family| family.get_name() == *expected_name);
+        assert!(found, "Missing Prometheus metric: {}", expected_name);
+    }
+
+    // Verify production metrics include filter effectiveness
+    let production_metrics = collector.get_production_metrics("test", true);
+    assert_eq!(
+        production_metrics
+            .filter_effectiveness
+            .updates_received_total,
+        100
+    );
+    assert_eq!(
+        production_metrics
+            .filter_effectiveness
+            .updates_after_filtering,
+        75
+    );
+    assert_eq!(
+        production_metrics
+            .filter_effectiveness
+            .filter_pass_rate_percent,
+        75.0
+    );
+    assert_eq!(
+        production_metrics.filter_effectiveness.filtered_by_token,
+        15
+    );
+    assert_eq!(
+        production_metrics
+            .filter_effectiveness
+            .filtered_by_token_pairs,
+        10
+    );
+}
+
+#[tokio::test]
+async fn test_filter_metrics_http_endpoint_availability() {
+    use market_data_ingestor::monitoring::MetricsCollector;
+    use market_data_ingestor::recording_monitor::RecordingStats;
+    use market_data_ingestor::steps::filter::{FilterMetrics, FilterReasons};
+    use prometheus::Encoder;
+
+    // Create metrics collector
+    let mut collector = MetricsCollector::new().expect("Failed to create metrics collector");
+
+    // Create sample filter metrics
+    let filter_metrics = FilterMetrics {
+        updates_received_total: 200,
+        updates_after_filtering: 150,
+        updates_filtered_out: 50,
+        filter_pass_rate_percent: 75.0,
+        filter_processing_time_ms: 1.2,
+        filter_reasons: FilterReasons {
+            filtered_by_token: 30,
+            filtered_by_dex: 0,
+            filtered_by_liquidity: 5,
+            filtered_by_token_pairs: 15,
+        },
+    };
+
+    // Create recording stats and add filter metrics
+    let mut stats = RecordingStats::new();
+    stats.record_filter_applied(&filter_metrics);
+
+    // Update metrics collector
+    collector.update_metrics(&stats, "integration_test", true);
+
+    // Test that metrics can be encoded for HTTP endpoint
+    let registry = collector.registry();
+    let metric_families = registry.gather();
+
+    let encoder = prometheus::TextEncoder::new();
+    let mut buffer = Vec::new();
+    encoder
+        .encode(&metric_families, &mut buffer)
+        .expect("Failed to encode metrics");
+
+    let metrics_output = String::from_utf8(buffer).expect("Failed to convert metrics to string");
+
+    // Verify filter metrics are included in output
+    assert!(metrics_output.contains("mdi_filter_updates_received_total"));
+    assert!(metrics_output.contains("mdi_filter_pass_rate_percent"));
+    assert!(metrics_output.contains("mdi_filter_breakdown_total"));
+
+    // Verify specific values are correct
+    assert!(metrics_output.contains("200")); // updates_received_total
+    assert!(metrics_output.contains("75")); // pass_rate_percent (as gauge value)
+}
+
+#[tokio::test]
+async fn test_real_world_filter_performance_benchmarking() {
+    use common::types::{ClmmMarketUpdate, MarketUpdate, TokenPair};
+    use config_lib::FilterConfig;
+    use market_data_ingestor::steps::filter::FilterStep;
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    // Create large dataset similar to real-world conditions
+    let mut large_updates = Vec::with_capacity(1000);
+    let tokens = ["USDT", "USDC", "BTC", "ETH", "DAI", "WETH", "APT", "SOL"];
+
+    for i in 0..1000 {
+        let token0 = tokens[i % tokens.len()];
+        let token1 = tokens[(i + 1) % tokens.len()];
+
+        large_updates.push(MarketUpdate::Clmm(ClmmMarketUpdate {
+            pool_address: format!("pool_{}", i),
+            dex_name: "benchmark_dex".to_string(),
+            token_pair: TokenPair {
+                token0: token0.to_string(),
+                token1: token1.to_string(),
+            },
+            sqrt_price: 100 + i as u128,
+            liquidity: 1000 + i as u128,
+            tick: (i % 200) as i32,
+            fee_bps: 30,
+            tick_map: HashMap::new(),
+        }));
+    }
+
+    // Test token filter performance
+    let filter_step = FilterStep::new(&FilterConfig::Token {
+        token: "USDT".to_string(),
+    });
+
+    let start = Instant::now();
+    let metrics = filter_step.apply_with_metrics(&mut large_updates);
+    let elapsed = start.elapsed();
+
+    // Performance requirements from Task7.md
+    assert!(
+        elapsed.as_millis() < 1,
+        "Filter processing took too long: {}ms",
+        elapsed.as_millis()
+    );
+    assert!(
+        metrics.filter_processing_time_ms < 1.0,
+        "Metrics show processing time too high: {}ms",
+        metrics.filter_processing_time_ms
+    );
+
+    // Verify metrics accuracy for large dataset
+    assert_eq!(metrics.updates_received_total, 1000);
+    assert!(metrics.updates_after_filtering > 0); // Some should match "USDT"
+    assert!(metrics.filter_pass_rate_percent >= 0.0 && metrics.filter_pass_rate_percent <= 100.0);
+
+    // Memory usage should remain bounded
+    // We can't easily test memory directly in Rust without additional crates,
+    // but we verify the operation completes successfully
+    assert_eq!(metrics.updates_received_total, 1000); // Basic sanity check
+}

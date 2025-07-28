@@ -12,6 +12,7 @@ pub struct ProductionMetrics {
     pub system_health: SystemHealthMetrics,
     pub error_tracking: ErrorTrackingMetrics,
     pub connection_status: ConnectionStatusMetrics,
+    pub filter_effectiveness: FilterEffectivenessMetrics,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +86,20 @@ pub enum ConnectionQuality {
     Disconnected,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilterEffectivenessMetrics {
+    pub updates_received_total: u64,
+    pub updates_after_filtering: u64,
+    pub updates_filtered_out: u64,
+    pub filter_pass_rate_percent: f64,
+    pub filter_processing_time_ms: f64,
+    pub filters_applied_total: u64,
+    pub filtered_by_token: u64,
+    pub filtered_by_dex: u64,
+    pub filtered_by_liquidity: u64,
+    pub filtered_by_token_pairs: u64,
+}
+
 pub struct PrometheusMetrics {
     pub registry: Registry,
 
@@ -118,6 +133,13 @@ pub struct PrometheusMetrics {
     pub cache_forced_evictions_total: Counter,
     pub max_cache_size_configured: Gauge,
     pub cache_retention_seconds_configured: Gauge,
+
+    pub filter_updates_received: Counter,
+    pub filter_updates_passed: Counter,
+    pub filter_updates_filtered: Counter,
+    pub filter_pass_rate: Gauge,
+    pub filter_processing_time: Histogram,
+    pub filter_breakdown: CounterVec,
 }
 
 impl PrometheusMetrics {
@@ -246,6 +268,42 @@ impl PrometheusMetrics {
         )?;
         registry.register(Box::new(cache_retention_seconds_configured.clone()))?;
 
+        let filter_updates_received = Counter::new(
+            "mdi_filter_updates_received_total",
+            "Total number of updates received by filter",
+        )?;
+        registry.register(Box::new(filter_updates_received.clone()))?;
+
+        let filter_updates_passed = Counter::new(
+            "mdi_filter_updates_passed_total",
+            "Total number of updates that passed filter",
+        )?;
+        registry.register(Box::new(filter_updates_passed.clone()))?;
+
+        let filter_updates_filtered = Counter::new(
+            "mdi_filter_updates_filtered_total",
+            "Total number of updates filtered out",
+        )?;
+        registry.register(Box::new(filter_updates_filtered.clone()))?;
+
+        let filter_pass_rate = Gauge::new(
+            "mdi_filter_pass_rate_percent",
+            "Filter pass rate percentage",
+        )?;
+        registry.register(Box::new(filter_pass_rate.clone()))?;
+
+        let filter_processing_time = Histogram::with_opts(HistogramOpts::new(
+            "mdi_filter_processing_time_seconds",
+            "Filter processing time in seconds",
+        ))?;
+        registry.register(Box::new(filter_processing_time.clone()))?;
+
+        let filter_breakdown = CounterVec::new(
+            Opts::new("mdi_filter_breakdown_total", "Filter breakdown by reason"),
+            &["filter_type"],
+        )?;
+        registry.register(Box::new(filter_breakdown.clone()))?;
+
         Ok(Self {
             registry,
             transactions_processed,
@@ -273,6 +331,12 @@ impl PrometheusMetrics {
             cache_forced_evictions_total,
             max_cache_size_configured,
             cache_retention_seconds_configured,
+            filter_updates_received,
+            filter_updates_passed,
+            filter_updates_filtered,
+            filter_pass_rate,
+            filter_processing_time,
+            filter_breakdown,
         })
     }
 
@@ -340,6 +404,32 @@ impl PrometheusMetrics {
         self.throughput
             .with_label_values(&["mb_per_sec"])
             .set(stats.bytes_per_second / 1024.0 / 1024.0);
+
+        self.filter_updates_received
+            .inc_by(stats.updates_received_total as f64);
+        self.filter_updates_passed
+            .inc_by(stats.updates_after_filtering as f64);
+        self.filter_updates_filtered
+            .inc_by(stats.updates_filtered_out as f64);
+        self.filter_pass_rate.set(stats.filter_pass_rate_percent);
+
+        if stats.filter_processing_time_ms > 0.0 {
+            self.filter_processing_time
+                .observe(stats.filter_processing_time_ms / 1000.0);
+        }
+
+        self.filter_breakdown
+            .with_label_values(&["token"])
+            .inc_by(stats.filtered_by_token as f64);
+        self.filter_breakdown
+            .with_label_values(&["token_pairs"])
+            .inc_by(stats.filtered_by_token_pairs as f64);
+        self.filter_breakdown
+            .with_label_values(&["dex"])
+            .inc_by(stats.filtered_by_dex as f64);
+        self.filter_breakdown
+            .with_label_values(&["liquidity"])
+            .inc_by(stats.filtered_by_liquidity as f64);
     }
 
     pub fn update_system_metrics(&self, system: &mut System) {
@@ -525,6 +615,18 @@ impl MetricsCollector {
                 data_source_type: data_source_type.to_string(),
                 last_heartbeat: stats.last_batch_time,
                 connection_quality,
+            },
+            filter_effectiveness: FilterEffectivenessMetrics {
+                updates_received_total: stats.updates_received_total,
+                updates_after_filtering: stats.updates_after_filtering,
+                updates_filtered_out: stats.updates_filtered_out,
+                filter_pass_rate_percent: stats.filter_pass_rate_percent,
+                filter_processing_time_ms: stats.filter_processing_time_ms,
+                filters_applied_total: stats.filters_applied_total,
+                filtered_by_token: stats.filtered_by_token,
+                filtered_by_dex: stats.filtered_by_dex,
+                filtered_by_liquidity: stats.filtered_by_liquidity,
+                filtered_by_token_pairs: stats.filtered_by_token_pairs,
             },
         }
     }

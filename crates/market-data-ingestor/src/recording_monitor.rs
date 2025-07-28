@@ -6,6 +6,7 @@ use tokio::time::interval;
 use tracing::{info, warn};
 
 use crate::recording_config::MonitoringSettings;
+use crate::steps::filter::FilterMetrics;
 
 /// Statistics for recording operations
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -37,6 +38,18 @@ pub struct RecordingStats {
     pub parsing_errors: u64,
     pub write_errors: u64,
     pub pool_fetch_timeouts: u64,
+
+    // Filter effectiveness metrics
+    pub updates_received_total: u64,
+    pub updates_after_filtering: u64,
+    pub updates_filtered_out: u64,
+    pub filter_pass_rate_percent: f64,
+    pub filter_processing_time_ms: f64,
+    pub filters_applied_total: u64,
+    pub filtered_by_token: u64,
+    pub filtered_by_dex: u64,
+    pub filtered_by_liquidity: u64,
+    pub filtered_by_token_pairs: u64,
 
     // Rate metrics (calculated)
     pub batches_per_second: f64,
@@ -123,6 +136,33 @@ impl RecordingStats {
         self.files_created += 1;
     }
 
+    /// Record filter metrics from a filter application
+    pub fn record_filter_applied(&mut self, filter_metrics: &FilterMetrics) {
+        self.filters_applied_total += 1;
+        self.updates_received_total += filter_metrics.updates_received_total;
+        self.updates_after_filtering += filter_metrics.updates_after_filtering;
+        self.updates_filtered_out += filter_metrics.updates_filtered_out;
+
+        // Update filter reason counters
+        self.filtered_by_token += filter_metrics.filter_reasons.filtered_by_token;
+        self.filtered_by_dex += filter_metrics.filter_reasons.filtered_by_dex;
+        self.filtered_by_liquidity += filter_metrics.filter_reasons.filtered_by_liquidity;
+        self.filtered_by_token_pairs += filter_metrics.filter_reasons.filtered_by_token_pairs;
+
+        // Update rolling average for processing time
+        let total_filters = self.filters_applied_total as f64;
+        self.filter_processing_time_ms = (self.filter_processing_time_ms * (total_filters - 1.0)
+            + filter_metrics.filter_processing_time_ms)
+            / total_filters;
+
+        // Update pass rate percentage
+        self.filter_pass_rate_percent = if self.updates_received_total > 0 {
+            (self.updates_after_filtering as f64 / self.updates_received_total as f64) * 100.0
+        } else {
+            100.0
+        };
+    }
+
     /// Update rate calculations
     fn update_rates(&mut self) {
         if let Some(start_time) = self.recording_start_time {
@@ -160,6 +200,8 @@ impl RecordingStats {
              Pools Discovered: {} (accepted: {}, rejected: {})\n\
              Pool States Fetched: {} (failures: {})\n\
              Avg Batch Time: {:.2}ms (min: {}ms, max: {}ms)\n\
+             Filter Metrics: {} filters applied, {:.2}% pass rate, {:.3}ms avg processing\n\
+             Filter Breakdown: token={}, token_pairs={}, dex={}, liquidity={}\n\
              Errors: conn={}, parse={}, write={}, timeouts={}",
             duration,
             self.batches_recorded,
@@ -181,6 +223,13 @@ impl RecordingStats {
                 self.min_batch_processing_ms
             },
             self.max_batch_processing_ms,
+            self.filters_applied_total,
+            self.filter_pass_rate_percent,
+            self.filter_processing_time_ms,
+            self.filtered_by_token,
+            self.filtered_by_token_pairs,
+            self.filtered_by_dex,
+            self.filtered_by_liquidity,
             self.connection_errors,
             self.parsing_errors,
             self.write_errors,

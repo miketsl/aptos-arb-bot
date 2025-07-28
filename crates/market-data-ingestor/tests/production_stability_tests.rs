@@ -681,9 +681,9 @@ async fn test_performance_regression() {
     println!("🏃 Starting performance regression test...");
 
     // Define performance baselines (these should be adjusted based on actual system performance)
-    const MIN_THROUGHPUT_TXN_PER_SEC: f64 = 500.0;  // Conservative baseline
-    const MAX_LATENCY_MS: f64 = 200.0;               // Conservative baseline
-    const MAX_MEMORY_USAGE_MB: f64 = 30000.0;        // 30GB limit (test system may use more memory)
+    const MIN_THROUGHPUT_TXN_PER_SEC: f64 = 500.0; // Conservative baseline
+    const MAX_LATENCY_MS: f64 = 200.0; // Conservative baseline
+    const MAX_MEMORY_USAGE_MB: f64 = 30000.0; // 30GB limit (test system may use more memory)
 
     // Run performance benchmark
     let benchmark_duration = Duration::from_secs(10); // Shorter test for CI
