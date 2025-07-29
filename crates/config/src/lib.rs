@@ -75,6 +75,22 @@ pub struct PerformanceConfig {
     pub critical_latency_multiplier: f64,
     #[serde(default = "default_warning_log_interval_seconds")]
     pub warning_log_interval_seconds: u64,
+
+    // Backpressure handling configuration
+    #[serde(default = "default_channel_send_timeout_ms")]
+    pub channel_send_timeout_ms: u64,
+    #[serde(default = "default_circuit_breaker_failure_threshold")]
+    pub circuit_breaker_failure_threshold: u32,
+    #[serde(default = "default_circuit_breaker_recovery_timeout_ms")]
+    pub circuit_breaker_recovery_timeout_ms: u64,
+    #[serde(default = "default_queue_depth_warning_threshold")]
+    pub queue_depth_warning_threshold: f64,
+    #[serde(default = "default_backpressure_retry_attempts")]
+    pub backpressure_retry_attempts: u32,
+    #[serde(default = "default_backpressure_retry_base_delay_ms")]
+    pub backpressure_retry_base_delay_ms: u64,
+    #[serde(default = "default_backpressure_retry_max_delay_ms")]
+    pub backpressure_retry_max_delay_ms: u64,
 }
 
 /// DEX adapter configuration - aligned with existing DexConfig
@@ -162,6 +178,35 @@ fn default_critical_latency_multiplier() -> f64 {
 
 fn default_warning_log_interval_seconds() -> u64 {
     60
+}
+
+// Backpressure handling defaults
+fn default_channel_send_timeout_ms() -> u64 {
+    5000
+}
+
+fn default_circuit_breaker_failure_threshold() -> u32 {
+    5
+}
+
+fn default_circuit_breaker_recovery_timeout_ms() -> u64 {
+    30000
+}
+
+fn default_queue_depth_warning_threshold() -> f64 {
+    0.8
+}
+
+fn default_backpressure_retry_attempts() -> u32 {
+    3
+}
+
+fn default_backpressure_retry_base_delay_ms() -> u64 {
+    100
+}
+
+fn default_backpressure_retry_max_delay_ms() -> u64 {
+    5000
 }
 
 // A serializable representation of the transaction stream config from the YAML.
@@ -376,6 +421,43 @@ pub fn validate_ingestor_config(config: &IngestorConfig) -> Result<(), anyhow::E
         ));
     }
 
+    // Validate backpressure configuration
+    if config.performance.channel_send_timeout_ms == 0 {
+        return Err(anyhow::anyhow!(
+            "channel_send_timeout_ms must be greater than 0"
+        ));
+    }
+
+    if config.performance.circuit_breaker_failure_threshold == 0 {
+        return Err(anyhow::anyhow!(
+            "circuit_breaker_failure_threshold must be greater than 0"
+        ));
+    }
+
+    if config.performance.circuit_breaker_recovery_timeout_ms == 0 {
+        return Err(anyhow::anyhow!(
+            "circuit_breaker_recovery_timeout_ms must be greater than 0"
+        ));
+    }
+
+    if config.performance.queue_depth_warning_threshold <= 0.0 || config.performance.queue_depth_warning_threshold > 1.0 {
+        return Err(anyhow::anyhow!(
+            "queue_depth_warning_threshold must be between 0.0 and 1.0"
+        ));
+    }
+
+    if config.performance.backpressure_retry_base_delay_ms == 0 {
+        return Err(anyhow::anyhow!(
+            "backpressure_retry_base_delay_ms must be greater than 0"
+        ));
+    }
+
+    if config.performance.backpressure_retry_max_delay_ms < config.performance.backpressure_retry_base_delay_ms {
+        return Err(anyhow::anyhow!(
+            "backpressure_retry_max_delay_ms must be greater than or equal to backpressure_retry_base_delay_ms"
+        ));
+    }
+
     // Validate adapter configurations
     for adapter in &config.adapters {
         if adapter.name.is_empty() {
@@ -424,6 +506,13 @@ pub fn default_ingestor_config() -> IngestorConfig {
             warning_escalation_count: default_warning_escalation_count(),
             critical_latency_multiplier: default_critical_latency_multiplier(),
             warning_log_interval_seconds: default_warning_log_interval_seconds(),
+            channel_send_timeout_ms: default_channel_send_timeout_ms(),
+            circuit_breaker_failure_threshold: default_circuit_breaker_failure_threshold(),
+            circuit_breaker_recovery_timeout_ms: default_circuit_breaker_recovery_timeout_ms(),
+            queue_depth_warning_threshold: default_queue_depth_warning_threshold(),
+            backpressure_retry_attempts: default_backpressure_retry_attempts(),
+            backpressure_retry_base_delay_ms: default_backpressure_retry_base_delay_ms(),
+            backpressure_retry_max_delay_ms: default_backpressure_retry_max_delay_ms(),
         },
         adapters: vec![],
         pool_state: PoolStateConfig {

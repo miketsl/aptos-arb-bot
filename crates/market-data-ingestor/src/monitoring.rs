@@ -16,6 +16,7 @@ pub struct ProductionMetrics {
     pub stage_timing: StageTimingMetrics,
     pub performance_warnings: PerformanceWarningMetrics,
     pub queue_monitoring: QueueMonitoringMetrics,
+    pub backpressure: BackpressureMetrics,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,6 +144,29 @@ pub struct QueueMonitoringMetrics {
     pub average_queue_utilization_percent: f64,
 }
 
+/// Enhanced backpressure and congestion metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackpressureMetrics {
+    pub channel_congestion_events: u64,
+    pub backpressure_duration_total_ms: f64,
+    pub circuit_breaker_activations: u64,
+    pub send_timeout_errors: u64,
+    pub retry_attempts_total: u64,
+    pub circuit_breaker_state: CircuitBreakerState,
+    pub queue_utilization_current_percent: f64,
+    pub queue_utilization_max_percent: f64,
+    pub consecutive_failures: u32,
+    pub last_congestion_timestamp: Option<SystemTime>,
+}
+
+/// Circuit breaker state for metrics reporting
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CircuitBreakerState {
+    Closed,
+    Open, 
+    HalfOpen,
+}
+
 pub struct PrometheusMetrics {
     pub registry: Registry,
 
@@ -202,6 +226,18 @@ pub struct PrometheusMetrics {
     pub queue_saturation_total: Counter,
     pub backpressure_duration: Histogram,
     pub queue_operations_total: Counter,
+
+    // Enhanced backpressure and circuit breaker metrics
+    pub channel_congestion_events_total: Counter,
+    pub backpressure_duration_total: Histogram,
+    pub circuit_breaker_activations_total: Counter,
+    pub send_timeout_errors_total: Counter,
+    pub retry_attempts_total: Counter,
+    pub circuit_breaker_state: Gauge,
+    pub queue_utilization_current: Gauge,
+    pub queue_utilization_max: Gauge,
+    pub consecutive_failures: Gauge,
+    pub backpressure_recovery_time: Histogram,
 }
 
 impl PrometheusMetrics {
@@ -447,6 +483,67 @@ impl PrometheusMetrics {
         )?;
         registry.register(Box::new(queue_operations_total.clone()))?;
 
+        // Enhanced backpressure and circuit breaker metrics
+        let channel_congestion_events_total = Counter::new(
+            "mdi_channel_congestion_events_total",
+            "Total number of channel congestion events",
+        )?;
+        registry.register(Box::new(channel_congestion_events_total.clone()))?;
+
+        let backpressure_duration_total = Histogram::with_opts(HistogramOpts::new(
+            "mdi_backpressure_duration_total_seconds",
+            "Total backpressure duration in seconds",
+        ))?;
+        registry.register(Box::new(backpressure_duration_total.clone()))?;
+
+        let circuit_breaker_activations_total = Counter::new(
+            "mdi_circuit_breaker_activations_total",
+            "Total number of circuit breaker activations",
+        )?;
+        registry.register(Box::new(circuit_breaker_activations_total.clone()))?;
+
+        let send_timeout_errors_total = Counter::new(
+            "mdi_send_timeout_errors_total", 
+            "Total number of send timeout errors",
+        )?;
+        registry.register(Box::new(send_timeout_errors_total.clone()))?;
+
+        let retry_attempts_total = Counter::new(
+            "mdi_retry_attempts_total",
+            "Total number of retry attempts",
+        )?;
+        registry.register(Box::new(retry_attempts_total.clone()))?;
+
+        let circuit_breaker_state = Gauge::new(
+            "mdi_circuit_breaker_state",
+            "Circuit breaker state (0=Closed, 1=Open, 2=HalfOpen)",
+        )?;
+        registry.register(Box::new(circuit_breaker_state.clone()))?;
+
+        let queue_utilization_current = Gauge::new(
+            "mdi_queue_utilization_current_percent",
+            "Current queue utilization percentage",
+        )?;
+        registry.register(Box::new(queue_utilization_current.clone()))?;
+
+        let queue_utilization_max = Gauge::new(
+            "mdi_queue_utilization_max_percent",
+            "Maximum observed queue utilization percentage",
+        )?;
+        registry.register(Box::new(queue_utilization_max.clone()))?;
+
+        let consecutive_failures = Gauge::new(
+            "mdi_consecutive_failures",
+            "Current number of consecutive failures",
+        )?;
+        registry.register(Box::new(consecutive_failures.clone()))?;
+
+        let backpressure_recovery_time = Histogram::with_opts(HistogramOpts::new(
+            "mdi_backpressure_recovery_time_seconds",
+            "Time taken to recover from backpressure in seconds",
+        ))?;
+        registry.register(Box::new(backpressure_recovery_time.clone()))?;
+
         Ok(Self {
             registry,
             transactions_processed,
@@ -493,6 +590,16 @@ impl PrometheusMetrics {
             queue_saturation_total,
             backpressure_duration,
             queue_operations_total,
+            channel_congestion_events_total,
+            backpressure_duration_total,
+            circuit_breaker_activations_total,
+            send_timeout_errors_total,
+            retry_attempts_total,
+            circuit_breaker_state,
+            queue_utilization_current,
+            queue_utilization_max,
+            consecutive_failures,
+            backpressure_recovery_time,
         })
     }
 
@@ -713,6 +820,45 @@ impl MetricsCollector {
         self.prometheus.queue_operations_total.inc();
     }
 
+    /// Update backpressure metrics from detector push step
+    pub fn update_backpressure_metrics(&self, 
+        congestion_events: u64,
+        timeout_errors: u64,
+        circuit_breaker_activations: u64,
+        retry_attempts: u32,
+        circuit_breaker_state: crate::steps::detector_push::CircuitBreakerState,
+        queue_utilization_percent: f64,
+        consecutive_failures: u32,
+        recovery_time_ms: Option<f64>
+    ) {
+        self.prometheus.channel_congestion_events_total.inc_by(congestion_events as f64);
+        self.prometheus.send_timeout_errors_total.inc_by(timeout_errors as f64);
+        self.prometheus.circuit_breaker_activations_total.inc_by(circuit_breaker_activations as f64);
+        self.prometheus.retry_attempts_total.inc_by(retry_attempts as f64);
+        
+        // Convert circuit breaker state to numeric
+        let state_value = match circuit_breaker_state {
+            crate::steps::detector_push::CircuitBreakerState::Closed => 0.0,
+            crate::steps::detector_push::CircuitBreakerState::Open => 1.0,
+            crate::steps::detector_push::CircuitBreakerState::HalfOpen => 2.0,
+        };
+        self.prometheus.circuit_breaker_state.set(state_value);
+        
+        self.prometheus.queue_utilization_current.set(queue_utilization_percent);
+        
+        // Update max utilization if current is higher
+        let current_max = self.prometheus.queue_utilization_max.get();
+        if queue_utilization_percent > current_max {
+            self.prometheus.queue_utilization_max.set(queue_utilization_percent);
+        }
+        
+        self.prometheus.consecutive_failures.set(consecutive_failures as f64);
+        
+        if let Some(recovery_ms) = recovery_time_ms {
+            self.prometheus.backpressure_recovery_time.observe(recovery_ms / 1000.0);
+        }
+    }
+
     pub fn get_production_metrics(
         &self,
         data_source_type: &str,
@@ -869,6 +1015,22 @@ impl MetricsCollector {
                 } else {
                     0.0
                 },
+            },
+            backpressure: BackpressureMetrics {
+                channel_congestion_events: 0, // Will be updated by detector push step
+                backpressure_duration_total_ms: 0.0,
+                circuit_breaker_activations: 0,
+                send_timeout_errors: 0,
+                retry_attempts_total: 0,
+                circuit_breaker_state: CircuitBreakerState::Closed,
+                queue_utilization_current_percent: if stats.queue_depth_max_observed > 0 {
+                    (stats.queue_depth_current as f64 / stats.queue_depth_max_observed as f64) * 100.0
+                } else {
+                    0.0
+                },
+                queue_utilization_max_percent: 100.0,
+                consecutive_failures: 0,
+                last_congestion_timestamp: None,
             },
         }
     }

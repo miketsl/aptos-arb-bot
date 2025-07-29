@@ -166,6 +166,18 @@ impl MarketDataIngestorProcessor {
                     queue_operations_total: 0,
                     average_queue_utilization_percent: 0.0,
                 },
+                backpressure: crate::monitoring::BackpressureMetrics {
+                    channel_congestion_events: 0,
+                    backpressure_duration_total_ms: 0.0,
+                    circuit_breaker_activations: 0,
+                    send_timeout_errors: 0,
+                    retry_attempts_total: 0,
+                    circuit_breaker_state: crate::monitoring::CircuitBreakerState::Closed,
+                    queue_utilization_current_percent: 0.0,
+                    queue_utilization_max_percent: 0.0,
+                    consecutive_failures: 0,
+                    last_congestion_timestamp: None,
+                },
             }
         }
     }
@@ -321,6 +333,47 @@ impl MarketDataIngestorProcessor {
         }
     }
 
+    /// Update backpressure metrics from detector push step state
+    fn update_backpressure_metrics(&self, detector_push: &DetectorPushStep) {
+        let congestion_metrics = detector_push.get_congestion_metrics();
+        let circuit_breaker_state = detector_push.get_circuit_breaker_state();
+        let is_experiencing_backpressure = detector_push.is_experiencing_backpressure();
+
+        // Update metrics collector with backpressure information
+        if let Ok(collector) = self.metrics_collector.read() {
+            // Calculate queue utilization from current metrics
+            let channel_capacity = 1000; // TODO: Get actual channel capacity from config
+            let queue_utilization_percent = if channel_capacity > 0 {
+                (congestion_metrics.queue_depth_current as f64 / channel_capacity as f64) * 100.0
+            } else {
+                0.0
+            };
+
+            collector.update_backpressure_metrics(
+                congestion_metrics.channel_congestion_events,
+                congestion_metrics.send_timeout_errors,
+                congestion_metrics.circuit_breaker_activations,
+                0, // retry_attempts - will be tracked in detector push step
+                circuit_breaker_state,
+                queue_utilization_percent,
+                congestion_metrics.consecutive_failures,
+                None, // recovery_time_ms - will be calculated when recovering
+            );
+        }
+
+        // Log backpressure events for monitoring
+        if is_experiencing_backpressure {
+            warn!(
+                congestion_events = congestion_metrics.channel_congestion_events,
+                timeout_errors = congestion_metrics.send_timeout_errors,
+                circuit_breaker_state = ?circuit_breaker_state,
+                consecutive_failures = congestion_metrics.consecutive_failures,
+                queue_depth = congestion_metrics.queue_depth_current,
+                "Backpressure detected in detector channel"
+            );
+        }
+    }
+
     pub async fn run_processor(mut self) -> Result<()> {
         info!("Starting Market Data Ingestor processor");
 
@@ -389,7 +442,18 @@ impl MarketDataIngestorProcessor {
         let mut event_extractor =
             EventExtractorStep::from_adapter_configs(self.config.ingestor_config.adapters.clone());
 
-        let detector_push = DetectorPushStep::new(update_sender);
+        // Create backpressure configuration from performance config
+        let backpressure_config = crate::steps::detector_push::BackpressureConfig {
+            send_timeout: Duration::from_millis(self.config.ingestor_config.performance.channel_send_timeout_ms),
+            circuit_breaker_failure_threshold: self.config.ingestor_config.performance.circuit_breaker_failure_threshold,
+            circuit_breaker_recovery_timeout: Duration::from_millis(self.config.ingestor_config.performance.circuit_breaker_recovery_timeout_ms),
+            queue_depth_warning_threshold: self.config.ingestor_config.performance.queue_depth_warning_threshold,
+            retry_attempts: self.config.ingestor_config.performance.backpressure_retry_attempts,
+            retry_base_delay: Duration::from_millis(self.config.ingestor_config.performance.backpressure_retry_base_delay_ms),
+            retry_max_delay: Duration::from_millis(self.config.ingestor_config.performance.backpressure_retry_max_delay_ms),
+        };
+
+        let detector_push = DetectorPushStep::new(update_sender, backpressure_config);
 
         info!("Starting main processing loop");
 
@@ -506,8 +570,11 @@ impl MarketDataIngestorProcessor {
                                                         if any_blocked { 1 } else { 0 },
                                                         total_queue_time,
                                                     );
-                                                }
+                                                 }
                                             }
+
+                                            // Update backpressure metrics from detector push step
+                                            self.update_backpressure_metrics(&detector_push);
 
                                             // Record stage timings
                                             let stage_timings = StageTimings::new(
