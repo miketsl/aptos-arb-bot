@@ -342,7 +342,7 @@ impl MarketDataIngestorProcessor {
         // Update metrics collector with backpressure information
         if let Ok(collector) = self.metrics_collector.read() {
             // Calculate queue utilization from current metrics
-            let channel_capacity = 1000; // TODO: Get actual channel capacity from config
+            let channel_capacity = self.config.ingestor_config.performance.channel_buffer_size;
             let queue_utilization_percent = if channel_capacity > 0 {
                 (congestion_metrics.queue_depth_current as f64 / channel_capacity as f64) * 100.0
             } else {
