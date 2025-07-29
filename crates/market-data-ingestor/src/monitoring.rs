@@ -41,13 +41,7 @@ pub struct PoolDiscoveryMetrics {
     pub pools_rejected: u64,
     pub pool_states_fetched: u64,
     pub pool_fetch_success_rate: f64,
-    pub cache_hit_rate: f64,
     pub discovery_latency_ms: f64,
-    pub cache_size_current: u64,
-    pub cache_overflows_total: u64,
-    pub cache_forced_evictions_total: u64,
-    pub max_cache_size_configured: u64,
-    pub cache_retention_seconds_configured: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,7 +51,6 @@ pub struct SystemHealthMetrics {
     pub cpu_usage_percent: f64,
     pub uptime_seconds: u64,
     pub active_connections: u64,
-    pub disk_usage_mb: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,7 +68,6 @@ pub struct ErrorTrackingMetrics {
 pub struct ConnectionStatusMetrics {
     pub is_connected: bool,
     pub connection_uptime_seconds: u64,
-    pub reconnection_count: u64,
     pub data_source_type: String,
     pub last_heartbeat: Option<SystemTime>,
     pub connection_quality: ConnectionQuality,
@@ -931,13 +923,7 @@ impl MetricsCollector {
                 pools_rejected: stats.pools_rejected,
                 pool_states_fetched: stats.pool_states_fetched,
                 pool_fetch_success_rate: pool_success_rate,
-                cache_hit_rate: 0.0,                    // TODO: Add cache metrics
-                discovery_latency_ms: 0.0,              // TODO: Add discovery latency tracking
-                cache_size_current: 0,                  // Will be updated in implementation
-                cache_overflows_total: 0,               // Track separately from recording stats
-                cache_forced_evictions_total: 0,        // Track separately from TTL evictions
-                max_cache_size_configured: 500,         // Default value, should come from config
-                cache_retention_seconds_configured: 30, // Default value, should come from config
+                discovery_latency_ms: 0.0,
             },
             system_health: SystemHealthMetrics {
                 memory_usage_mb: memory_used as f64 / 1024.0 / 1024.0,
@@ -945,7 +931,6 @@ impl MetricsCollector {
                 cpu_usage_percent: self.system.global_cpu_info().cpu_usage() as f64,
                 uptime_seconds: uptime,
                 active_connections: if is_connected { 1 } else { 0 },
-                disk_usage_mb: 0.0, // TODO: Add disk usage tracking
             },
             error_tracking: ErrorTrackingMetrics {
                 connection_errors: stats.connection_errors,
@@ -954,12 +939,15 @@ impl MetricsCollector {
                 timeout_errors: stats.pool_fetch_timeouts,
                 total_errors,
                 error_rate_percent: error_rate,
-                errors_per_minute: 0.0, // TODO: Add error rate calculation
+                errors_per_minute: if uptime > 0 { 
+                    (total_errors as f64 / (uptime as f64 / 60.0)) 
+                } else { 
+                    0.0 
+                },
             },
             connection_status: ConnectionStatusMetrics {
                 is_connected,
                 connection_uptime_seconds: uptime,
-                reconnection_count: 0, // TODO: Add reconnection tracking
                 data_source_type: data_source_type.to_string(),
                 last_heartbeat: stats.last_batch_time,
                 connection_quality,
